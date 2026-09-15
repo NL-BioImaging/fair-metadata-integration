@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fair-metadata-integration"
+version = "0.1.0"
+description = "Integrate and package all metadata into RO-Crate, linking to other metadata files"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [
+    { name = "Joost de Folter", email = "joost.defolter@crick.ac.uk" },
+]
+keywords = ["RO-Crate", "FAIR", "metadata", "bioimaging", "OME-Zarr"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "rocrate>=0.15.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/NL-BioImaging/fair-metadata-integration"
+Repository = "https://github.com/NL-BioImaging/fair-metadata-integration"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+# -s disables output capture so print() from passing tests is visible
+addopts = "-s"
