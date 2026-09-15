@@ -64,6 +64,11 @@ RO-Crate profile:
 }
 ```
 
+The workflow's `programmingLanguage` is a `ComputerLanguage` entity for the
+Bilayers specification, identified by its Zenodo concept DOI
+[`10.5281/zenodo.17652333`](https://doi.org/10.5281/zenodo.17652333), which
+resolves to the latest release of the spec.
+
 Inputs and outputs are modelled as `FormalParameter` entities carrying an
 [EDAM](https://edamontology.org/) format IRI — `format_3915` for Zarr,
 `format_3591` for TIFF. Each image dataset points back at the parameter it

@@ -66,13 +66,18 @@ def get_additional_filetype_property(path):
 
 
 def get_bilayers_language(crate):
-    """Return the ComputerLanguage entity for a bilayers workflow specification."""
+    """Return the ComputerLanguage entity for a bilayers workflow specification.
+
+    Identified by the Zenodo concept DOI, which is version-independent and
+    resolves to the latest release of the specification.
+    """
     return crate.add(ComputerLanguage(
         crate,
-        identifier='https://w3id.org/bilayers',
+        identifier='https://doi.org/10.5281/zenodo.17652333',
         properties={
-            'name': 'Bilayers workflow specification',
-            'alternateName': 'bilayers',
+            'name': 'Bilayers',
+            'alternateName': 'Bilayers workflow specification',
+            'identifier': {'@id': 'https://doi.org/10.5281/zenodo.17652333'},
             'url': {'@id': 'https://github.com/bilayer-containers/bilayers'},
         },
     ))

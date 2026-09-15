@@ -147,10 +147,12 @@ class TestCreateRoCrate:
         assert entities["input.ome.zarr/"]["exampleOfWork"] == {"@id": "#input"}
         assert entities["output.ome.zarr/"]["exampleOfWork"] == {"@id": "#output"}
 
-        # The language must describe bilayers, not CWL.
+        # The language must describe bilayers, not CWL, and must be identified by
+        # a resolvable persistent identifier rather than an invented one.
         lang = entities[workflow["programmingLanguage"]["@id"]]
         assert lang["@type"] == "ComputerLanguage"
-        assert "ilayers" in lang["name"]
+        assert lang["name"] == "Bilayers"
+        assert lang["@id"] == "https://doi.org/10.5281/zenodo.17652333"
 
     def test_payload_files_are_copied_into_crate(self, tmp_path, bilayers_config, ome_zarr_dirs):
         """Every entity in the crate is backed by a file that is actually there."""
