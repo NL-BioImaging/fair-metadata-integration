@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
 authors = [
-    { name = "Joost de Folter", email = "joost.defolter@crick.ac.uk" },
+    { name = "Joost de Folter", email = "folterj@gmail.com" },
 ]
 keywords = ["RO-Crate", "FAIR", "metadata", "bioimaging", "OME-Zarr"]
 classifiers = [
