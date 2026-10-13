@@ -11,7 +11,7 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
         "channel": "https://www.openmicroscopy.org/Schemas/Documentation/Generated/OME-2016-06/ome_xsd.html#Channel",
         "obo": "http://purl.obolibrary.org/obo/",
         "FBcv": "http://ontobee.org/ontology/FBcv/",
-        "acquisiton_method": {
+        "acquisition_method": {
             "@reverse": "https://schema.org/result",
             "@type": "@id",
         },
