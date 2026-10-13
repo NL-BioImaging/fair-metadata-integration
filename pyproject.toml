@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
-    "rocrate>=0.15.1",
+    "rocrate>=0.16.0",
 ]
 
 [project.optional-dependencies]

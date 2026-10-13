@@ -4,7 +4,7 @@ Integrate and package all metadata into RO-Crate, linking to other metadata file
 
 Given a [Bilayers](https://github.com/bilayer-containers/bilayers) workflow
 specification and the image data an analysis consumed and produced, this package
-writes a [Workflow RO-Crate](https://w3id.org/workflowhub/workflow-ro-crate/1.0):
+writes a [Workflow RO-Crate](https://w3id.org/workflowhub/workflow-ro-crate/1.1):
 an `ro-crate-metadata.json` describing the run, alongside copies of the files it
 describes.
 
@@ -49,18 +49,23 @@ crate/
 ### What the crate contains
 
 The workflow specification is the crate's `mainEntity`, typed as a
-`ComputationalWorkflow`, and the metadata descriptor declares the Workflow
-RO-Crate profile:
+`ComputationalWorkflow`. The metadata descriptor declares RO-Crate 1.3, and the
+root dataset declares the Workflow RO-Crate 1.1 profile:
 
 ```json
 {
   "@id": "ro-crate-metadata.json",
   "@type": "CreativeWork",
   "about": { "@id": "./" },
+  "conformsTo": { "@id": "https://w3id.org/ro/crate/1.3" }
+},
+{
+  "@id": "./",
+  "@type": "Dataset",
   "conformsTo": [
-    { "@id": "https://w3id.org/ro/crate/1.2" },
-    { "@id": "https://w3id.org/workflowhub/workflow-ro-crate/1.0" }
-  ]
+    { "@id": "https://w3id.org/workflowhub/workflow-ro-crate/1.1" }
+  ],
+  "mainEntity": { "@id": "config.yaml" }
 }
 ```
 

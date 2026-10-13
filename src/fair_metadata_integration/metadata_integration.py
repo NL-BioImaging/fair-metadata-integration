@@ -8,7 +8,6 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
 
     crate.metadata.extra_terms = {
         "organism_classification": "https://schema.org/taxonomicRange",
-        "BioChemEntity": "https://schema.org/BioChemEntity",
         "channel": "https://www.openmicroscopy.org/Schemas/Documentation/Generated/OME-2016-06/ome_xsd.html#Channel",
         "obo": "http://purl.obolibrary.org/obo/",
         "FBcv": "http://ontobee.org/ontology/FBcv/",
@@ -33,9 +32,8 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
                                      dest_path=os.path.basename(input_path.rstrip('\\/')),
                                      properties=get_additional_filetype_property(input_path))
 
-    # main=True sets the root dataset's mainEntity and declares the Workflow RO-Crate
-    # profile in conformsTo (on the metadata descriptor for rocrate < 0.16, on the
-    # root dataset for rocrate >= 0.16).
+    # main=True sets the root dataset's mainEntity and adds the Workflow RO-Crate
+    # profile to the root dataset's conformsTo.
     workflow = crate.add_workflow(source=workflow_schema_filename,
                                   dest_path=os.path.basename(workflow_schema_filename),
                                   main=True, lang=get_bilayers_language(crate))
