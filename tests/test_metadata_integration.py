@@ -124,11 +124,19 @@ class TestCreateRoCrate:
 
         entities = self._read_entities(dest)
 
-        # The metadata descriptor must declare the profile alongside the base spec.
-        conforms_to = {
-            ref["@id"] for ref in entities["ro-crate-metadata.json"]["conformsTo"]
-        }
-        assert "https://w3id.org/workflowhub/workflow-ro-crate/1.0" in conforms_to
+        # The crate must declare the Workflow RO-Crate profile. rocrate < 0.16
+        # (RO-Crate 1.1) lists it on the metadata descriptor; rocrate >= 0.16
+        # (RO-Crate 1.2+) lists it on the root dataset.
+        conforms_to = set()
+        for entity_id in ("ro-crate-metadata.json", "./"):
+            refs = entities[entity_id].get("conformsTo", [])
+            if isinstance(refs, dict):
+                refs = [refs]
+            conforms_to.update(ref["@id"] for ref in refs)
+        assert any(
+            uri.startswith("https://w3id.org/workflowhub/workflow-ro-crate/")
+            for uri in conforms_to
+        ), conforms_to
 
         # The root dataset must point at the workflow as its main entity.
         assert entities["./"]["mainEntity"] == {"@id": "config.yaml"}

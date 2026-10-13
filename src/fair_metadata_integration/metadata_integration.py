@@ -33,8 +33,9 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
                                      dest_path=os.path.basename(input_path.rstrip('\\/')),
                                      properties=get_additional_filetype_property(input_path))
 
-    # main=True sets the root dataset's mainEntity and adds the Workflow RO-Crate
-    # profile to the metadata descriptor's conformsTo.
+    # main=True sets the root dataset's mainEntity and declares the Workflow RO-Crate
+    # profile in conformsTo (on the metadata descriptor for rocrate < 0.16, on the
+    # root dataset for rocrate >= 0.16).
     workflow = crate.add_workflow(source=workflow_schema_filename,
                                   dest_path=os.path.basename(workflow_schema_filename),
                                   main=True, lang=get_bilayers_language(crate))
