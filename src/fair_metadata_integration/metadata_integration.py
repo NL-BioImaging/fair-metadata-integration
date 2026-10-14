@@ -53,15 +53,29 @@ def add_data_entity(crate, path):
     return crate.add_file(source=path, dest_path=dest_path, properties=properties)
 
 
+# EDAM formats by file name ending (most specific first)
+EDAM_FORMATS = [
+    (('.ome.tif', '.ome.tiff'), 'format_3727'),  # OME-TIFF
+    (('.zarr', '.zar'), 'format_3915'),  # Zarr
+    (('.tif', '.tiff'), 'format_3591'),  # TIFF
+    (('.png',), 'format_3603'),  # PNG
+    (('.jpg', '.jpeg'), 'format_3579'),  # JPG
+    (('.h5', '.hdf5'), 'format_3590'),  # HDF5
+    (('.csv',), 'format_3752'),  # CSV
+    (('.tsv',), 'format_3475'),  # TSV
+    (('.xlsx',), 'format_3620'),  # xlsx
+    (('.json',), 'format_3464'),  # JSON
+    (('.yaml', '.yml'), 'format_3750'),  # YAML
+    (('.xml',), 'format_2332'),  # XML
+    (('.txt',), 'format_2330'),  # Textual format
+]
+
+
 def get_additional_filetype_property(path):
-    ext = os.path.splitext(path)[1]
-    ref = None
-    if '.zar' in ext:
-        ref = 'http://edamontology.org/format_3915'
-    elif '.tif' in ext:
-        ref = 'http://edamontology.org/format_3591'
-    if ref:
-        return {'additionalType': ref}
+    name = os.path.basename(str(path).rstrip('\\/')).lower()
+    for endings, edam_format in EDAM_FORMATS:
+        if name.endswith(endings):
+            return {'additionalType': f'http://edamontology.org/{edam_format}'}
     return None
 
 

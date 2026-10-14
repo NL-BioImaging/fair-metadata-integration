@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import pytest
 
-from fair_metadata_integration.metadata_integration import create_ro_crate
+from fair_metadata_integration.metadata_integration import create_ro_crate, get_additional_filetype_property
 
 
 BILAYERS_CONFIG = """\
@@ -208,6 +208,19 @@ class TestCreateRoCrate:
             assert entities[eid]["@type"] == "File"
         assert entities["input.tif"]["additionalType"] == "http://edamontology.org/format_3591"
         assert entities["labels.tiff"]["exampleOfWork"] == {"@id": "#output_2"}
+
+    @pytest.mark.parametrize("name, edam", [
+        ("image.ome.tiff", "format_3727"), ("image.OME.TIF", "format_3727"), ("image.tif", "format_3591"),
+        ("image.ome.zarr", "format_3915"), ("image.ome.zarr/", "format_3915"), ("labels.png", "format_3603"),
+        ("photo.jpeg", "format_3579"), ("data.h5", "format_3590"), ("Nuclei.csv", "format_3752"),
+        ("table.tsv", "format_3475"), ("table.xlsx", "format_3620"), ("result.json", "format_3464"),
+        ("config.yml", "format_3750"), ("meta.xml", "format_2332"), ("log.txt", "format_2330"),
+    ])
+    def test_edam_format_from_file_name(self, name, edam):
+        assert get_additional_filetype_property(name) == {"additionalType": f"http://edamontology.org/{edam}"}
+
+    def test_unknown_format_has_no_edam_type(self):
+        assert get_additional_filetype_property("weights.pt") is None
 
     def test_multiple_outputs_get_distinct_parameters(self, tmp_path, bilayers_config):
         """Each output dataset gets its own FormalParameter."""

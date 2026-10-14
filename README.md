@@ -75,9 +75,11 @@ Bilayers specification, identified by its Zenodo concept DOI
 resolves to the latest release of the spec.
 
 Inputs and outputs are modelled as `FormalParameter` entities carrying an
-[EDAM](https://edamontology.org/) format IRI — `format_3915` for Zarr,
-`format_3591` for TIFF. Each image dataset points back at the parameter it
-realises via `exampleOfWork`:
+[EDAM](https://edamontology.org/) format IRI, from the file name: `format_3915`
+for Zarr, `format_3727` for OME-TIFF, `format_3591` for TIFF, and PNG, JPEG, HDF5,
+CSV, TSV, xlsx, JSON, YAML, XML and text. Folders (e.g. OME-Zarr) are `Dataset`
+entities, files `File` entities, copied with their content. Each data entity
+points back at the parameter it realises via `exampleOfWork`:
 
 ```json
 {
