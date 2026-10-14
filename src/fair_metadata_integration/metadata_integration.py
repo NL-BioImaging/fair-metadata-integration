@@ -21,16 +21,8 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
         "specimen": "http://purl.obolibrary.org/obo/HSO_0000308",
     }
 
-    output_entities = []
-    for image_path in output_paths:
-        rel_path = os.path.basename(image_path.rstrip('\\/'))
-        output_entities.append(crate.add_dataset(
-            source=image_path, dest_path=rel_path,
-            properties=get_additional_filetype_property(image_path)))
-
-    input_entity = crate.add_dataset(source=input_path,
-                                     dest_path=os.path.basename(input_path.rstrip('\\/')),
-                                     properties=get_additional_filetype_property(input_path))
+    output_entities = [add_data_entity(crate, path) for path in output_paths]
+    input_entity = add_data_entity(crate, input_path)
 
     # main=True sets the root dataset's mainEntity and adds the Workflow RO-Crate
     # profile to the root dataset's conformsTo.
@@ -50,6 +42,15 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
 
     crate.write(dest_path)
     return crate
+
+
+def add_data_entity(crate, path):
+    """Add *path* to the crate root: a folder (e.g. OME-Zarr) as a Dataset, a file (e.g. TIFF, CSV) as a File."""
+    dest_path = os.path.basename(str(path).rstrip('\\/'))
+    properties = get_additional_filetype_property(str(path))
+    if os.path.isdir(path):
+        return crate.add_dataset(source=path, dest_path=dest_path, properties=properties)
+    return crate.add_file(source=path, dest_path=dest_path, properties=properties)
 
 
 def get_additional_filetype_property(path):

@@ -182,6 +182,33 @@ class TestCreateRoCrate:
                 continue
             assert (dest / eid).exists(), f"entity '{eid}' has no file in the crate"
 
+    def test_file_input_and_outputs_are_copied_as_files(self, tmp_path, bilayers_config):
+        """Files (TIFF, CSV) are File entities with their content, not empty Dataset folders."""
+        input_tiff = tmp_path / "input.tif"
+        input_tiff.write_bytes(b"II*\x00input")
+        output_csv = tmp_path / "Nuclei.csv"
+        output_csv.write_text("ObjectNumber,Area\n1,42\n")
+        output_tiff = tmp_path / "labels.tiff"
+        output_tiff.write_bytes(b"II*\x00labels")
+        dest = tmp_path / "crate"
+        dest.mkdir()
+
+        create_ro_crate(
+            dest_path=str(dest),
+            workflow_schema_filename=str(bilayers_config),
+            input_path=str(input_tiff),
+            output_paths=[str(output_csv), str(output_tiff)],
+        )
+
+        assert (dest / "input.tif").read_bytes() == b"II*\x00input"
+        assert (dest / "Nuclei.csv").read_text() == "ObjectNumber,Area\n1,42\n"
+        assert (dest / "labels.tiff").read_bytes() == b"II*\x00labels"
+        entities = self._read_entities(dest)
+        for eid in ("input.tif", "Nuclei.csv", "labels.tiff"):
+            assert entities[eid]["@type"] == "File"
+        assert entities["input.tif"]["additionalType"] == "http://edamontology.org/format_3591"
+        assert entities["labels.tiff"]["exampleOfWork"] == {"@id": "#output_2"}
+
     def test_multiple_outputs_get_distinct_parameters(self, tmp_path, bilayers_config):
         """Each output dataset gets its own FormalParameter."""
         input_zarr = tmp_path / "input.ome.zarr"
