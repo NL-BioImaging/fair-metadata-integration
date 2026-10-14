@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fair-metadata-integration"
-version = "0.2.0"
+version = "0.2.1"
 description = "Integrate and package all metadata into RO-Crate, linking to other metadata files"
 readme = "README.md"
 license = "MIT"
