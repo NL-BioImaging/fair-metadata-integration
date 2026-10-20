@@ -113,6 +113,22 @@ pip install -e ".[test]"
 pytest
 ```
 
+### Releasing
+
+The package version comes from the git tag, via
+[`setuptools-scm`](https://setuptools-scm.readthedocs.io/); there is no version
+to bump in `pyproject.toml`.
+
+1. Optionally, do a dry run: run the *Publish to PyPI* workflow manually from
+   the Actions tab. It builds, tests and uploads a development version (e.g.
+   `0.2.4.dev2`) to [TestPyPI](https://test.pypi.org/project/fair-metadata-integration/).
+2. Create a GitHub release with a new tag, e.g. `v0.2.4`, on the commit to
+   release. Publishing the release builds, tests and uploads that version to
+   [PyPI](https://pypi.org/project/fair-metadata-integration/).
+
+PyPI never accepts the same version twice. If a release fails after uploading,
+release a new version rather than reusing the tag.
+
 ## License
 
 MIT
