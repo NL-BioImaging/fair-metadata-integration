@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "fair-metadata-integration"
-version = "0.2.2"
+dynamic = ["version"]
 description = "Integrate and package all metadata into RO-Crate, linking to other metadata files"
 readme = "README.md"
 license = "MIT"
@@ -31,6 +31,8 @@ test = ["pytest>=7.0"]
 [project.urls]
 Homepage = "https://github.com/NL-BioImaging/fair-metadata-integration"
 Repository = "https://github.com/NL-BioImaging/fair-metadata-integration"
+
+[tool.setuptools_scm]
 
 [tool.setuptools.packages.find]
 where = ["src"]
