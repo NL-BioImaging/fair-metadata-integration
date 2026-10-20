@@ -33,6 +33,9 @@ Homepage = "https://github.com/NL-BioImaging/fair-metadata-integration"
 Repository = "https://github.com/NL-BioImaging/fair-metadata-integration"
 
 [tool.setuptools_scm]
+# PyPI and TestPyPI reject local versions ("+g<hash>"), so untagged builds
+# are plain ".devN" versions.
+local_scheme = "no-local-version"
 
 [tool.setuptools.packages.find]
 where = ["src"]
