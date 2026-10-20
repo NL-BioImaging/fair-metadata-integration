@@ -3,8 +3,8 @@ from rocrate.rocrate import ROCrate
 from rocrate.model import ComputerLanguage, ContextEntity
 
 
-def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_paths=[]):
-    crate = ROCrate()
+def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_paths=[], gen_preview=True):
+    crate = ROCrate(gen_preview=gen_preview)
 
     crate.metadata.extra_terms = {
         "organism_classification": "https://schema.org/taxonomicRange",
