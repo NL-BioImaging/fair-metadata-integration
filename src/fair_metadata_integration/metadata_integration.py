@@ -2,9 +2,11 @@ import os.path
 from rocrate.rocrate import ROCrate
 from rocrate.model import ComputerLanguage, ContextEntity
 
+from .preview import CratePreview
+
 
 def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_paths=[], gen_preview=True):
-    crate = ROCrate(gen_preview=gen_preview)
+    crate = ROCrate()
 
     crate.metadata.extra_terms = {
         "organism_classification": "https://schema.org/taxonomicRange",
@@ -40,6 +42,9 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
             for i, entity in enumerate(output_entities)
         ]
 
+    if gen_preview:
+        crate.add(CratePreview(crate))
+
     crate.write(dest_path)
     return crate
 
@@ -47,36 +52,51 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
 def add_data_entity(crate, path):
     """Add *path* to the crate root: a folder (e.g. OME-Zarr) as a Dataset, a file (e.g. TIFF, CSV) as a File."""
     dest_path = os.path.basename(str(path).rstrip('\\/'))
-    properties = get_additional_filetype_property(str(path))
+    properties = get_encoding_format_property(crate, str(path))
     if os.path.isdir(path):
         return crate.add_dataset(source=path, dest_path=dest_path, properties=properties)
     return crate.add_file(source=path, dest_path=dest_path, properties=properties)
 
 
-# EDAM formats by file name ending (most specific first)
+# EDAM formats by file name ending (most specific first), with their name and IANA media type
 EDAM_FORMATS = [
-    (('.ome.tif', '.ome.tiff'), 'format_3727'),  # OME-TIFF
-    (('.zarr', '.zar'), 'format_3915'),  # Zarr
-    (('.tif', '.tiff'), 'format_3591'),  # TIFF
-    (('.png',), 'format_3603'),  # PNG
-    (('.jpg', '.jpeg'), 'format_3579'),  # JPG
-    (('.h5', '.hdf5'), 'format_3590'),  # HDF5
-    (('.csv',), 'format_3752'),  # CSV
-    (('.tsv',), 'format_3475'),  # TSV
-    (('.xlsx',), 'format_3620'),  # xlsx
-    (('.json',), 'format_3464'),  # JSON
-    (('.yaml', '.yml'), 'format_3750'),  # YAML
-    (('.xml',), 'format_2332'),  # XML
-    (('.txt',), 'format_2330'),  # Textual format
+    (('.ome.tif', '.ome.tiff'), 'format_3727', 'OME-TIFF', 'image/tiff'),
+    (('.zarr', '.zar'), 'format_3915', 'Zarr', None),
+    (('.tif', '.tiff'), 'format_3591', 'TIFF', 'image/tiff'),
+    (('.png',), 'format_3603', 'PNG', 'image/png'),
+    (('.jpg', '.jpeg'), 'format_3579', 'JPEG', 'image/jpeg'),
+    (('.h5', '.hdf5'), 'format_3590', 'HDF5', None),
+    (('.csv',), 'format_3752', 'CSV', 'text/csv'),
+    (('.tsv',), 'format_3475', 'TSV', 'text/tab-separated-values'),
+    (('.xlsx',), 'format_3620', 'xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    (('.json',), 'format_3464', 'JSON', 'application/json'),
+    (('.yaml', '.yml'), 'format_3750', 'YAML', 'application/yaml'),
+    (('.xml',), 'format_2332', 'XML', 'application/xml'),
+    (('.txt',), 'format_2330', 'Textual format', 'text/plain'),
 ]
 
 
-def get_additional_filetype_property(path):
+def get_file_format(path):
+    """The (EDAM format IRI, format name, IANA media type or None) of *path*, from its name, or None."""
     name = os.path.basename(str(path).rstrip('\\/')).lower()
-    for endings, edam_format in EDAM_FORMATS:
+    for endings, edam_format, format_name, media_type in EDAM_FORMATS:
         if name.endswith(endings):
-            return {'additionalType': f'http://edamontology.org/{edam_format}'}
+            return f'http://edamontology.org/{edam_format}', format_name, media_type
     return None
+
+
+def get_encoding_format_property(crate, path):
+    """The encodingFormat of *path*: its media type and a reference to its EDAM format.
+
+    As RO-Crate recommends, the format is a contextual entity (a WebPage) in the crate.
+    """
+    file_format = get_file_format(path)
+    if not file_format:
+        return None
+    edam_iri, format_name, media_type = file_format
+    crate.add(ContextEntity(crate, edam_iri, {'@type': 'WebPage', 'name': format_name}))
+    encoding_format = {'@id': edam_iri}
+    return {'encodingFormat': [media_type, encoding_format] if media_type else encoding_format}
 
 
 def get_bilayers_language(crate):
@@ -100,9 +120,12 @@ def get_bilayers_language(crate):
 def add_formal_parameter(crate, data_entity, name):
     """Add a FormalParameter describing *data_entity* and link the two together."""
     properties = {'@type': 'FormalParameter', 'name': name}
-    format_ref = data_entity.get('additionalType')
+    # Bioschemas FormalParameter takes the format as a URL: the data entity's EDAM format, not its media type
+    encoding_format = data_entity.as_jsonld().get('encodingFormat')
+    format_ref = next((f for f in (encoding_format if isinstance(encoding_format, list) else [encoding_format])
+                       if isinstance(f, dict)), None)
     if format_ref:
-        properties['format'] = {'@id': format_ref}
+        properties['encodingFormat'] = format_ref
     parameter = crate.add(ContextEntity(crate, f'#{name}', properties))
     data_entity['exampleOfWork'] = parameter
     return parameter

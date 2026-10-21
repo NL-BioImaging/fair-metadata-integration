@@ -3,7 +3,8 @@ import os
 from pathlib import Path
 import pytest
 
-from fair_metadata_integration.metadata_integration import create_ro_crate, get_additional_filetype_property
+from fair_metadata_integration.metadata_integration import create_ro_crate, get_file_format
+from fair_metadata_integration.preview import ome_zarr_details, table_details
 
 
 BILAYERS_CONFIG = """\
@@ -68,6 +69,46 @@ def make_ome_zarr_dirs(path: Path) -> tuple[Path, Path]:
     return input_zarr, output_zarr
 
 
+def write_json(path: Path, content) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(content))
+
+
+MULTISCALES = {
+    "name": "cells",
+    "axes": [
+        {"name": "c", "type": "channel"},
+        {"name": "y", "type": "space", "unit": "micrometer"},
+        {"name": "x", "type": "space", "unit": "micrometer"},
+    ],
+    "datasets": [
+        {"path": "0", "coordinateTransformations": [{"type": "scale", "scale": [1.0, 0.5, 0.5]}]},
+        {"path": "1", "coordinateTransformations": [{"type": "scale", "scale": [1.0, 1.0, 1.0]}]},
+    ],
+}
+OMERO = {"channels": [{"label": "DAPI", "color": "0000FF"}, {"label": "GFP", "color": "00FF00"}]}
+
+
+def make_ome_zarr_v2(path: Path) -> Path:
+    """An OME-Zarr 0.4 (Zarr v2) image with two resolution levels, two channels and a label image."""
+    write_json(path / ".zattrs", {"multiscales": [{"version": "0.4", **MULTISCALES}], "omero": OMERO})
+    write_json(path / "0" / ".zarray", {"shape": [2, 512, 512], "chunks": [1, 256, 256], "dtype": "<u2"})
+    write_json(path / "1" / ".zarray", {"shape": [2, 256, 256], "chunks": [1, 256, 256], "dtype": "<u2"})
+    write_json(path / "labels" / ".zattrs", {"labels": ["nuclei"]})
+    return path
+
+
+def make_ome_zarr_v3(path: Path) -> Path:
+    """An OME-Zarr 0.5 (Zarr v3) image."""
+    write_json(path / "zarr.json", {"zarr_format": 3, "node_type": "group", "attributes": {
+        "ome": {"version": "0.5", "multiscales": [MULTISCALES], "omero": OMERO}}})
+    for level, size in (("0", 512), ("1", 256)):
+        write_json(path / level / "zarr.json", {
+            "zarr_format": 3, "node_type": "array", "shape": [2, size, size], "data_type": "uint16",
+            "chunk_grid": {"name": "regular", "configuration": {"chunk_shape": [1, 256, 256]}}})
+    return path
+
+
 class TestCreateRoCrate:
     @pytest.fixture()
     def bilayers_config(self, tmp_path: Path) -> Path:
@@ -91,10 +132,6 @@ class TestCreateRoCrate:
         )
 
         assert (dest / "ro-crate-metadata.json").exists()
-
-        metadata = json.loads((dest / "ro-crate-metadata.json").read_text())
-        print("\n--- ro-crate-metadata.json ---")
-        print(json.dumps(metadata, indent=2))
 
         ids = self._read_ids(dest)
         # rocrate normalises paths to forward-slashes with a trailing '/'.
@@ -149,6 +186,10 @@ class TestCreateRoCrate:
         # Each dataset links back to the parameter it is an example of.
         assert entities["input.ome.zarr/"]["exampleOfWork"] == {"@id": "#input"}
         assert entities["output.ome.zarr/"]["exampleOfWork"] == {"@id": "#output"}
+
+        # Parameters give their EDAM format with the Bioschemas encodingFormat property.
+        assert entities["#input"]["encodingFormat"] == {"@id": "http://edamontology.org/format_3915"}
+        assert "format" not in entities["#input"]
 
         # The language must describe bilayers, not CWL, and must be identified by
         # a resolvable persistent identifier rather than an invented one.
@@ -206,8 +247,27 @@ class TestCreateRoCrate:
         entities = self._read_entities(dest)
         for eid in ("input.tif", "Nuclei.csv", "labels.tiff"):
             assert entities[eid]["@type"] == "File"
-        assert entities["input.tif"]["additionalType"] == "http://edamontology.org/format_3591"
         assert entities["labels.tiff"]["exampleOfWork"] == {"@id": "#output_2"}
+
+    def test_encoding_format(self, tmp_path, bilayers_config, ome_zarr_dirs):
+        """Files give their media type and EDAM format, folders their EDAM format; formats are WebPage entities."""
+        input_zarr, _ = ome_zarr_dirs
+        output_csv = tmp_path / "Nuclei.csv"
+        output_csv.write_text("ObjectNumber,Area\n1,42\n")
+        dest = tmp_path / "crate"
+
+        create_ro_crate(str(dest), str(bilayers_config), str(input_zarr), [str(output_csv)])
+
+        entities = self._read_entities(dest)
+        csv_format = "http://edamontology.org/format_3752"
+        zarr_format = "http://edamontology.org/format_3915"
+        assert entities["Nuclei.csv"]["encodingFormat"] == ["text/csv", {"@id": csv_format}]
+        assert entities["input.ome.zarr/"]["encodingFormat"] == {"@id": zarr_format}
+        assert entities[csv_format] == {"@id": csv_format, "@type": "WebPage", "name": "CSV"}
+        assert entities[zarr_format] == {"@id": zarr_format, "@type": "WebPage", "name": "Zarr"}
+        # The parameter refers to the EDAM format only.
+        assert entities["#output"]["encodingFormat"] == {"@id": csv_format}
+        assert not any("additionalType" in entity for entity in entities.values())
 
     @pytest.mark.parametrize("name, edam", [
         ("image.ome.tiff", "format_3727"), ("image.OME.TIF", "format_3727"), ("image.tif", "format_3591"),
@@ -217,10 +277,10 @@ class TestCreateRoCrate:
         ("config.yml", "format_3750"), ("meta.xml", "format_2332"), ("log.txt", "format_2330"),
     ])
     def test_edam_format_from_file_name(self, name, edam):
-        assert get_additional_filetype_property(name) == {"additionalType": f"http://edamontology.org/{edam}"}
+        assert get_file_format(name)[0] == f"http://edamontology.org/{edam}"
 
     def test_unknown_format_has_no_edam_type(self):
-        assert get_additional_filetype_property("weights.pt") is None
+        assert get_file_format("weights.pt") is None
 
     def test_multiple_outputs_get_distinct_parameters(self, tmp_path, bilayers_config):
         """Each output dataset gets its own FormalParameter."""
@@ -258,24 +318,203 @@ class TestCreateRoCrate:
         return {entity["@id"] for entity in metadata["@graph"]}
 
 
+class TestPreview:
+    def test_preview_is_written_and_not_part_of_the_payload(self, tmp_path):
+        dest = self._make_crate(tmp_path, make_ome_zarr_v2(tmp_path / "input.ome.zarr"))
+
+        assert (dest / "ro-crate-preview.html").exists()
+        entities = TestCreateRoCrate._read_entities(dest)
+        assert entities["ro-crate-preview.html"]["about"] == {"@id": "./"}
+        assert {"@id": "ro-crate-preview.html"} not in entities["./"]["hasPart"]
+
+    def test_no_preview_when_disabled(self, tmp_path):
+        input_zarr = make_ome_zarr_v2(tmp_path / "input.ome.zarr")
+        dest = tmp_path / "crate"
+
+        create_ro_crate(str(dest), str(make_bilayers_config(tmp_path)), str(input_zarr), gen_preview=False)
+
+        assert not (dest / "ro-crate-preview.html").exists()
+        assert "ro-crate-preview.html" not in TestCreateRoCrate._read_ids(dest)
+
+    def test_preview_links_entities_and_terms(self, tmp_path):
+        """Every entity has a section, references link to them, and terms link to their definition."""
+        dest = self._make_crate(tmp_path, make_ome_zarr_v2(tmp_path / "input.ome.zarr"))
+        page = (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
+
+        # The metadata and preview files themselves are linked, not described.
+        assert '<a href="ro-crate-metadata.json">' in page
+        for entity_id in TestCreateRoCrate._read_ids(dest) - {"ro-crate-metadata.json", "ro-crate-preview.html"}:
+            assert f"<code>{entity_id}</code>" in page, f"entity '{entity_id}' missing from the preview"
+        # The workflow's output links to its FormalParameter's section.
+        assert '<a href="#output">output</a>' in page
+        assert '<section class="entity" id="output">' in page
+        assert '<a href="https://doi.org/10.5281/zenodo.17652333">' in page
+        assert '<a href="http://schema.org/exampleOfWork" title="A creative work that this work is an example' in page
+        assert '<a href="output.ome.zarr/">open</a>' in page
+
+    def test_preview_shows_csv_and_ome_zarr_details(self, tmp_path):
+        input_zarr = make_ome_zarr_v2(tmp_path / "input.ome.zarr")
+        table = tmp_path / "Nuclei.csv"
+        table.write_text("ImageNumber,ObjectNumber,AreaShape_Area\n1,1,42.5\n1,2,40.0\n")
+        dest = tmp_path / "crate"
+
+        create_ro_crate(str(dest), str(make_bilayers_config(tmp_path)), str(input_zarr), [str(table)])
+        page = (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
+
+        assert "2 rows &times; 3 columns" in page
+        assert "<li>AreaShape_Area</li>" in page
+        assert "OME-Zarr 0.4" in page
+        assert "Axes: c, y (micrometer), x (micrometer)" in page
+        assert ("<td>2 &times; 512 &times; 512</td><td>1 &times; 256 &times; 256</td>"
+                "<td>&lt;u2</td><td>1 &times; 0.5 &times; 0.5</td>") in page
+        assert '<span class="swatch" style="background:#0000FF"></span>DAPI' in page
+        assert "Label images: nuclei" in page
+
+    def test_text_files_get_a_browsable_view(self, tmp_path):
+        """CSV and other text files link to an HTML view in ro-crate-preview_files/; binary files do not."""
+        input_tiff = tmp_path / "input.tif"
+        input_tiff.write_bytes(b"II*\x00\x00\x01binary")
+        table = tmp_path / "Nuclei.csv"
+        table.write_text("# header l,d\nObjectNumber,AreaShape_Area\n1,42.5\n2,<40>\n")
+        dest = tmp_path / "crate"
+
+        create_ro_crate(str(dest), str(make_bilayers_config(tmp_path)), str(input_tiff), [str(table)])
+        page = (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
+
+        assert '<a href="ro-crate-preview_files/Nuclei.csv.html">view</a>' in page
+        assert '<a href="Nuclei.csv">raw file</a>' in page
+        assert '<a href="ro-crate-preview_files/config.yaml.html">view</a>' in page
+        assert '<a href="input.tif">open</a>' in page
+        assert not (dest / "ro-crate-preview_files" / "input.tif.html").exists()
+
+        table_view = (dest / "ro-crate-preview_files" / "Nuclei.csv.html").read_text(encoding="utf-8")
+        assert '<a href="../ro-crate-preview.html#Nuclei.csv">' in table_view
+        assert '<a href="../Nuclei.csv">raw file</a>' in table_view
+        assert "<th>ObjectNumber</th><th>AreaShape_Area</th>" in table_view
+        assert '<tr class="types"><th>integer</th><th>decimal</th></tr>' in table_view
+        assert "<tr><td>2</td><td>&lt;40&gt;</td></tr>" in table_view
+
+        text_view = (dest / "ro-crate-preview_files" / "config.yaml.html").read_text(encoding="utf-8")
+        assert "algorithm_folder_name: &quot;empanada_inference&quot;" in text_view
+
+        # The views are not payload: they are not described in the metadata.
+        assert not any(eid.startswith("ro-crate-preview_files") for eid in TestCreateRoCrate._read_ids(dest))
+
+    def test_large_table_view_is_truncated(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("fair_metadata_integration.preview.MAX_VIEW_ROWS", 2)
+        table = tmp_path / "Image.csv"
+        table.write_text("ImageNumber\n1\n2\n3\n")
+
+        dest = self._make_crate(tmp_path, make_ome_zarr_v2(tmp_path / "input.ome.zarr"), [table])
+
+        view = (dest / "ro-crate-preview_files" / "Image.csv.html").read_text(encoding="utf-8")
+        assert "3 rows &times; 1 columns, showing the first 2" in view
+        assert "<td>3</td>" not in view
+
+    def test_unreadable_details_do_not_break_the_preview(self, tmp_path):
+        broken = tmp_path / "broken.ome.zarr"
+        broken.mkdir()
+        (broken / ".zattrs").write_text("{not json")
+
+        dest = self._make_crate(tmp_path, broken)
+
+        assert "OME-Zarr" not in (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
+
+    def test_cellprofiler_csv_column_types(self, tmp_path):
+        table = tmp_path / "Image.csv"
+        table.write_text("# header l,d,s\nImageNumber,Count_Cells,FileName_DNA\n1,12.0,a.tif\n2,8.0,b.tif\n")
+
+        assert table_details(table) == {
+            "columns": ["ImageNumber", "Count_Cells", "FileName_DNA"],
+            "types": ["integer", "decimal", "text"],
+            "rows": 2,
+        }
+
+    def test_ome_zarr_v3_details(self, tmp_path):
+        details = ome_zarr_details(make_ome_zarr_v3(tmp_path / "image.ome.zarr"))
+
+        assert details["version"] == "0.5"
+        image = details["images"][0]
+        assert image["name"] == "cells"
+        assert [level["shape"] for level in image["levels"]] == [[2, 512, 512], [2, 256, 256]]
+        assert image["levels"][0]["chunks"] == [1, 256, 256]
+        assert image["levels"][0]["dtype"] == "uint16"
+        assert [channel["label"] for channel in image["channels"]] == ["DAPI", "GFP"]
+
+    def test_ome_zarr_plate_and_bioformats2raw_details(self, tmp_path):
+        plate = tmp_path / "plate.ome.zarr"
+        write_json(plate / ".zattrs", {"plate": {
+            "version": "0.4", "name": "screen", "rows": [{"name": "A"}, {"name": "B"}],
+            "columns": [{"name": "1"}, {"name": "2"}, {"name": "3"}], "wells": [{"path": "A/1"}, {"path": "B/3"}]}})
+        converted = tmp_path / "converted.ome.zarr"
+        write_json(converted / ".zattrs", {"bioformats2raw.layout": 3})
+        make_ome_zarr_v2(converted / "0")
+        make_ome_zarr_v2(converted / "1")
+
+        assert ome_zarr_details(plate)["plate"] == {"name": "screen", "rows": 2, "columns": 3, "wells": 2}
+        series = ome_zarr_details(converted)["images"]
+        assert [image["name"] for image in series] == ["Series 0", "Series 1"]
+        assert series[1]["levels"][1]["shape"] == [2, 256, 256]
+
+    def test_plain_folder_has_no_ome_zarr_details(self, tmp_path):
+        (tmp_path / "images").mkdir()
+        assert ome_zarr_details(tmp_path / "images") is None
+
+    @staticmethod
+    def _make_crate(tmp_path: Path, input_path: Path, output_paths: list[Path] | None = None) -> Path:
+        dest = tmp_path / "crate"
+        if output_paths is None:
+            output = tmp_path / "output.ome.zarr"
+            output.mkdir(exist_ok=True)
+            output_paths = [output]
+        create_ro_crate(str(dest), str(make_bilayers_config(tmp_path)), str(input_path), [str(p) for p in output_paths])
+        return dest
+
+
+def make_example_crate(tmp_path: Path) -> Path:
+    """Write an example crate to inspect under *tmp_path*, print where it is, and return its folder.
+
+    OME-Zarr input with channels and a label image; OME-Zarr (Zarr v3) and CellProfiler CSV outputs.
+    """
+    sources = tmp_path / "sources"
+    sources.mkdir(parents=True, exist_ok=True)
+
+    bilayers_config = make_bilayers_config(sources)
+    input_zarr = make_ome_zarr_v2(sources / "cells.ome.zarr")
+    output_labels = make_ome_zarr_v3(sources / "segmentation.ome.zarr")
+    output_csv = sources / "Nuclei.csv"
+    output_csv.write_text(
+        "# header l,l,d,d,s\n"
+        "ImageNumber,ObjectNumber,AreaShape_Area,Intensity_MeanIntensity_DAPI,FileName_DAPI\n"
+        "1,1,412.0,0.21,cells.ome.zarr\n"
+        "1,2,388.0,0.19,cells.ome.zarr\n"
+        "1,3,455.0,0.24,cells.ome.zarr\n"
+    )
+    dest = tmp_path / "output"
+
+    create_ro_crate(
+        dest_path=str(dest),
+        workflow_schema_filename=str(bilayers_config),
+        input_path=str(input_zarr),
+        output_paths=[str(output_labels), str(output_csv)],
+    )
+
+    print(f"\nCrate:    {dest}")
+    print(f"Metadata: {dest / 'ro-crate-metadata.json'}")
+    print(f"Preview:  {dest / 'ro-crate-preview.html'}")
+    return dest
+
+
+def test_example_crate(tmp_path):
+    """Writes the example crate and prints its path; pytest keeps tmp_path of the last 3 runs (see with -s)."""
+    dest = make_example_crate(tmp_path)
+
+    assert (dest / "ro-crate-preview.html").exists()
+
+
 if __name__ == "__main__":
-    import pprint
+    # Write the example crate to a folder that is kept: python tests/test_metadata_integration.py [folder]
+    import sys
     import tempfile
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-
-        bilayers_config = make_bilayers_config(tmp_path)
-        input_zarr, output_zarr = make_ome_zarr_dirs(tmp_path)
-        dest = tmp_path / "crate"
-        dest.mkdir()
-
-        create_ro_crate(
-            dest_path=str(dest),
-            workflow_schema_filename=str(bilayers_config),
-            input_path=str(input_zarr),
-            output_paths=[str(output_zarr)],
-        )
-
-        metadata = json.loads((dest / "ro-crate-metadata.json").read_text())
-        pprint.pprint(metadata)
+    make_example_crate(Path(sys.argv[1] if len(sys.argv) > 1 else tempfile.mkdtemp(prefix="fair-metadata-crate-")))
