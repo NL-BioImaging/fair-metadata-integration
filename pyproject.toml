@@ -22,6 +22,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
+    "pyyaml>=6.0",
     "rocrate>=0.16.0",
 ]
 

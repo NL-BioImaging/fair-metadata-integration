@@ -419,11 +419,49 @@ class TestPreview:
         assert '<tr class="types"><th>integer</th><th>decimal</th></tr>' in table_view
         assert "<tr><td>2</td><td>&lt;40&gt;</td></tr>" in table_view
 
-        text_view = (dest / "ro-crate-preview_files" / "config.yaml.html").read_text(encoding="utf-8")
-        assert "algorithm_folder_name: &quot;empanada_inference&quot;" in text_view
+        config_view = (dest / "ro-crate-preview_files" / "config.yaml.html").read_text(encoding="utf-8")
+        assert '<li><span class="key">algorithm_folder_name</span>: <span class="string">empanada_inference</span></li>' in config_view
 
         # The views are not payload: they are not described in the metadata.
         assert not any(eid.startswith("ro-crate-preview_files") for eid in TestCreateRoCrate._read_ids(dest))
+
+    def test_preview_shows_bilayers_details(self, tmp_path):
+        dest = self._make_crate(tmp_path, make_ome_zarr_v2(tmp_path / "input.ome.zarr"))
+        page = (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
+
+        assert "<strong>Bilayers workflow</strong>" in page
+        assert 'Empanada (<a href="https://doi.org/10.1083/jcb.202208005">doi:10.1083/jcb.202208005</a>)' in page
+        assert "Docker image: <code>czii/empanada-napari:latest</code> (linux/amd64)" in page
+        assert "Command: <code>python -m empanada.inference</code>" in page
+        assert "<tr><td>input_image</td><td>image</td><td>--image</td><td></td></tr>" in page
+        assert "<tr><td>model</td><td>string</td><td>--model</td><td>MitoNet_v1_mini</td><td></td></tr>" in page
+
+    def test_json_and_yaml_views_are_trees(self, tmp_path):
+        """JSON and YAML files are shown as a collapsible tree; files that do not parse as plain text."""
+        dest = tmp_path / "crate"
+        dest.mkdir()
+        measurements = dest / "measurements.json"
+        write_json(measurements, {"cells": [{"id": 1, "area": 42.5, "url": "https://example.org/<1>"}],
+                                  "valid": True, "note": None, "empty": []})
+        broken = dest / "broken.yaml"
+        broken.write_text("key: [unclosed\n")
+
+        create_ro_crate(str(dest), str(make_bilayers_config(tmp_path)), str(make_ome_zarr_v2(tmp_path / "input.ome.zarr")),
+                        [str(measurements), str(broken)])
+        page = (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
+        view = (dest / "ro-crate-preview_files" / "measurements.json.html").read_text(encoding="utf-8")
+
+        assert '<a href="ro-crate-preview_files/measurements.json.html">view</a>' in page
+        assert ('<details open><summary><span class="key">cells</span> <span class="type">1 item</span></summary>'
+                '<ul><li><details open><summary><span class="index">0</span> <span class="type">3 items</span>') in view
+        assert '<li><span class="key">area</span>: 42.5</li>' in view
+        assert ('<li><span class="key">url</span>: <a href="https://example.org/&lt;1&gt;">'
+                'https://example.org/&lt;1&gt;</a></li>') in view
+        assert '<li><span class="key">valid</span>: <span class="type">true</span></li>' in view
+        assert '<li><span class="key">note</span>: <span class="type">null</span></li>' in view
+        assert '<li><span class="key">empty</span>: <span class="type">[]</span></li>' in view
+        broken_view = (dest / "ro-crate-preview_files" / "broken.yaml.html").read_text(encoding="utf-8")
+        assert "<pre>key: [unclosed\n</pre>" in broken_view
 
     def test_large_table_view_is_truncated(self, tmp_path, monkeypatch):
         monkeypatch.setattr("fair_metadata_integration.preview.MAX_VIEW_ROWS", 2)

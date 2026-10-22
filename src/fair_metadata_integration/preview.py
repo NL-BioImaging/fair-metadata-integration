@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 from urllib.request import url2pathname
 
+import yaml
 from rocrate import vocabs
 from rocrate.model import Preview
 
@@ -21,9 +22,10 @@ class CratePreview(Preview):
     """RO-Crate preview listing every entity with all its properties.
 
     References to other entities link to their section of the page, external URIs and
-    property names link to their definitions, and CSV/TSV files and OME-Zarr folders get
-    a summary of their content, read from the entity's source. Text files, which a browser
-    would download rather than show, get a browsable view in ro-crate-preview_files/.
+    property names link to their definitions, and CSV/TSV files, bilayers configurations and
+    OME-Zarr folders get a summary of their content, read from the entity's source. Text files,
+    which a browser would download rather than show, get a browsable view in
+    ro-crate-preview_files/: a table for CSV/TSV, a tree of keys and values for JSON/YAML.
     """
 
     def _index(self):
@@ -179,18 +181,94 @@ def render_entity(entity, entities, anchors, extra_terms, source=None, view=None
 
 
 def render_details(source):
-    """Content summary for a CSV/TSV file or an OME-Zarr folder; empty if there is none."""
+    """Content summary for a CSV/TSV file, a bilayers configuration or an OME-Zarr folder; empty if there is none."""
     try:
         path = Path(source)
         if path.is_file() and path.suffix.lower() in ('.csv', '.tsv'):
             return render_table_details(table_details(path))
+        if path.is_file() and path.suffix.lower() in STRUCTURED_SUFFIXES:
+            details = bilayers_details(read_structured(path))
+            if details:
+                return render_bilayers_details(details)
         if path.is_dir():
             details = ome_zarr_details(path)
             if details:
                 return render_ome_zarr_details(details)
-    except (OSError, ValueError, TypeError, KeyError, IndexError, csv.Error):
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, csv.Error, yaml.YAMLError):
         pass
     return ''
+
+
+# File name endings of the structured (JSON/YAML) text files that get a tree view
+STRUCTURED_SUFFIXES = ('.json', '.yaml', '.yml')
+
+
+def read_structured(path):
+    """The parsed content of a JSON or YAML file."""
+    with open(path, encoding='utf-8') as f:
+        return json.load(f) if Path(path).suffix.lower() == '.json' else yaml.safe_load(f)
+
+
+def bilayers_details(config):
+    """Summary of a bilayers workflow configuration, or None if *config* is not one."""
+    if not isinstance(config, dict) or not {'docker_image', 'exec_function'} <= config.keys():
+        return None
+
+    def items(key):
+        return [item for item in config.get(key) or [] if isinstance(item, dict)]
+
+    image = config.get('docker_image') or {}
+    docker_image = '/'.join(str(image[k]) for k in ('org', 'name') if image.get(k))
+    if docker_image and image.get('tag'):
+        docker_image += f':{image["tag"]}'
+    return {
+        'citations': items('citations'),
+        'docker_image': docker_image,
+        'platform': image.get('platform'),
+        'command': (config.get('exec_function') or {}).get('cli_command'),
+        'inputs': items('inputs'),
+        'outputs': items('outputs'),
+        'parameters': items('parameters'),
+    }
+
+
+def render_bilayers_details(details):
+    parts = ['<p><strong>Bilayers workflow</strong></p>']
+    for citation in details['citations']:
+        text = html.escape(str(citation.get('name') or ''))
+        doi = citation.get('doi')
+        if doi:
+            url = html.escape(f'https://doi.org/{quote(str(doi))}')
+            text += f' (<a href="{url}">doi:{html.escape(str(doi))}</a>)'
+        if citation.get('description'):
+            text += f': {html.escape(str(citation["description"]))}'
+        parts.append(f'<p>{text}</p>')
+    if details['docker_image']:
+        platform = f' ({html.escape(str(details["platform"]))})' if details.get('platform') else ''
+        parts.append(f'<p>Docker image: <code>{html.escape(details["docker_image"])}</code>{platform}</p>')
+    if details['command']:
+        parts.append(f'<p>Command: <code>{html.escape(str(details["command"]))}</code></p>')
+    for key, title in (('inputs', 'Inputs'), ('outputs', 'Outputs'), ('parameters', 'Parameters')):
+        if details[key]:
+            parts.append(f'<p>{title}:</p>' + render_bilayers_items(details[key], with_default=key == 'parameters'))
+    return '<div class="details">' + ''.join(parts) + '</div>'
+
+
+def render_bilayers_items(items, with_default=False):
+    """Table of the inputs, outputs or parameters of a bilayers configuration."""
+    columns = ['Name', 'Type', 'Option'] + (['Default'] if with_default else []) + ['Description']
+    head = '<tr>' + ''.join(f'<th>{c}</th>' for c in columns) + '</tr>'
+
+    def cell(value):
+        return f'<td>{html.escape("" if value is None else str(value))}</td>'
+
+    rows = ''.join(
+        '<tr>' + cell(item.get('name')) + cell(item.get('type')) + cell(item.get('cli_tag'))
+        + (cell(item.get('default')) if with_default else '')
+        + cell(item.get('description') or item.get('label')) + '</tr>'
+        for item in items
+    )
+    return f'<table>{head}{rows}</table>'
 
 
 # Column type codes of CellProfiler's "# header" line
@@ -261,7 +339,7 @@ def is_text_file(source):
 
 
 def render_view(entity_id, anchor, source):
-    """Browsable HTML of a text file: a table for CSV/TSV, the text itself otherwise."""
+    """Browsable HTML of a text file: a table for CSV/TSV, a tree for JSON/YAML, the text itself otherwise."""
     name = html.escape(entity_id)
     back = f'../ro-crate-preview.html#{quote(anchor)}'
     raw = file_href(entity_id, '../')
@@ -270,6 +348,8 @@ def render_view(entity_id, anchor, source):
     try:
         if source.suffix.lower() in ('.csv', '.tsv'):
             parts.append(render_table_view(read_table(source, MAX_VIEW_ROWS)))
+        elif source.suffix.lower() in STRUCTURED_SUFFIXES and (tree := render_structured_view(source)):
+            parts.append(tree)
         else:
             with open(source, encoding='utf-8', errors='replace') as f:
                 text = f.read(MAX_VIEW_BYTES + 1)
@@ -279,6 +359,53 @@ def render_view(entity_id, anchor, source):
     except (OSError, ValueError, csv.Error) as error:
         parts.append(f'<p class="note">The file could not be read: {html.escape(str(error))}</p>')
     return PAGE.format(title=name, style=STYLE, main_class='wide', body='\n'.join(parts))
+
+
+def render_structured_view(source):
+    """Collapsible tree of the content of a JSON or YAML file; None if it is too large or cannot be parsed."""
+    try:
+        if source.stat().st_size > MAX_VIEW_BYTES:
+            return None
+        content = read_structured(source)
+    except (OSError, ValueError, yaml.YAMLError):
+        return None
+    if not isinstance(content, (dict, list)):
+        return None
+    return f'<div class="tree">{render_tree(content)}</div>'
+
+
+def render_tree(value):
+    """Nested lists of the keys and values of parsed JSON/YAML; non-empty mappings and lists can be collapsed."""
+    if isinstance(value, dict):
+        entries = [(f'<span class="key">{html.escape(str(key))}</span>', item) for key, item in value.items()]
+    elif isinstance(value, list):
+        entries = [(f'<span class="index">{i}</span>', item) for i, item in enumerate(value)]
+    else:
+        return render_scalar(value)
+    if not entries:
+        return f'<span class="type">{"{}" if isinstance(value, dict) else "[]"}</span>'
+    lines = []
+    for key, item in entries:
+        if isinstance(item, (dict, list)) and item:
+            size = f'{len(item)} {"item" if len(item) == 1 else "items"}'
+            lines.append(f'<li><details open><summary>{key} '
+                         f'<span class="type">{size}</span></summary>{render_tree(item)}</details></li>')
+        else:
+            lines.append(f'<li>{key}: {render_tree(item)}</li>')
+    return '<ul>' + ''.join(lines) + '</ul>'
+
+
+def render_scalar(value):
+    if value is None:
+        return '<span class="type">null</span>'
+    if isinstance(value, bool):
+        return f'<span class="type">{str(value).lower()}</span>'
+    text = html.escape(str(value))
+    if isinstance(value, (int, float)):
+        return text
+    if re.match(r'^(https?|ftp)://', str(value)):
+        return f'<a href="{text}">{text}</a>'
+    return f'<span class="string">{text}</span>'
 
 
 def render_table_view(table):
@@ -449,6 +576,14 @@ th, td { border: 1px solid var(--line); padding: 2px 8px; text-align: left; }
 .swatch { display: inline-block; width: 0.9em; height: 0.9em; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 .nav { margin: 0 0 8px; }
 .note { color: var(--muted); }
+.tree { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px;
+        font: 13px/1.6 ui-monospace, monospace; overflow-x: auto; }
+.tree ul { list-style: none; margin: 0; padding-left: 1.4em; }
+.tree > ul { padding-left: 0; }
+.tree summary { cursor: pointer; }
+.tree .key { font-weight: 600; }
+.tree .index { color: var(--muted); }
+.tree .string { white-space: pre-wrap; overflow-wrap: anywhere; }
 pre { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 13px; }
 .table-view { overflow: auto; max-height: 80vh; border: 1px solid var(--line); background: var(--card); }
 .table-view table { display: table; margin: 0; font-size: 13px; }
