@@ -4,7 +4,8 @@ import html
 import json
 import re
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
+from urllib.request import url2pathname
 
 from rocrate import vocabs
 from rocrate.model import Preview
@@ -33,7 +34,7 @@ class CratePreview(Preview):
         """Map the @id of each data entity with a text file source to (its view's path, its source)."""
         views = {}
         for entity in self.crate.data_entities:
-            source = getattr(entity, 'source', None)
+            source = local_source(entity)
             if source is not None and is_text_file(source):
                 views[entity.id] = (f'{VIEWS_DIR}/{anchors[entity.id]}.html', Path(source))
         return views
@@ -75,11 +76,19 @@ class CratePreview(Preview):
         parts.append('<h2>Root dataset</h2>' + section(root))
         if crate.data_entities:
             parts.append('<h2>Files and folders</h2>')
-            parts.extend(section(e, getattr(e, 'source', None)) for e in crate.data_entities)
+            parts.extend(section(e, local_source(e)) for e in crate.data_entities)
         if crate.contextual_entities:
             parts.append('<h2>Contextual entities</h2>')
             parts.extend(section(e) for e in crate.contextual_entities)
         return PAGE.format(title=title, style=STYLE, main_class='', body='\n'.join(parts))
+
+
+def local_source(entity):
+    """The local path an entity was made from, also for data referenced by its file URI; else None."""
+    source = getattr(entity, 'source', None)
+    if isinstance(source, str) and source.startswith('file:'):
+        return Path(url2pathname(urlsplit(source).path))
+    return source
 
 
 def make_anchors(entities):

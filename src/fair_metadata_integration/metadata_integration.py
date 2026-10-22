@@ -1,4 +1,5 @@
 import os.path
+from pathlib import Path
 from rocrate.rocrate import ROCrate
 from rocrate.model import ComputerLanguage, ContextEntity
 
@@ -23,8 +24,8 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
         "specimen": "http://purl.obolibrary.org/obo/HSO_0000308",
     }
 
-    output_entities = [add_data_entity(crate, path) for path in output_paths]
-    input_entity = add_data_entity(crate, input_path)
+    output_entities = [add_data_entity(crate, path, dest_path) for path in output_paths]
+    input_entity = add_data_entity(crate, input_path, dest_path)
 
     # main=True sets the root dataset's mainEntity and adds the Workflow RO-Crate
     # profile to the root dataset's conformsTo.
@@ -49,13 +50,27 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
     return crate
 
 
-def add_data_entity(crate, path):
-    """Add *path* to the crate root: a folder (e.g. OME-Zarr) as a Dataset, a file (e.g. TIFF, CSV) as a File."""
-    dest_path = os.path.basename(str(path).rstrip('\\/'))
+def add_data_entity(crate, path, crate_path):
+    """Add *path* to the crate: a folder (e.g. OME-Zarr) as a Dataset, a file (e.g. TIFF, CSV) as a File.
+
+    Data inside *crate_path* is part of the crate where it is, and is not copied. Data
+    outside it, such as the original input image, is referenced by its file URI rather
+    than copied into the crate.
+    """
     properties = get_encoding_format_property(crate, str(path))
-    if os.path.isdir(path):
-        return crate.add_dataset(source=path, dest_path=dest_path, properties=properties)
-    return crate.add_file(source=path, dest_path=dest_path, properties=properties)
+    add = crate.add_dataset if os.path.isdir(path) else crate.add_file
+    rel_path = relative_path_inside(path, crate_path)
+    if rel_path is None:
+        return add(source=Path(path).resolve().as_uri(), properties=properties)
+    return add(source=path, dest_path=rel_path, properties=properties)
+
+
+def relative_path_inside(path, folder):
+    """The path of *path* relative to *folder*, or None if it is not inside it."""
+    path, folder = Path(path).resolve(), Path(folder).resolve()
+    if path == folder or not path.is_relative_to(folder):
+        return None
+    return path.relative_to(folder).as_posix()
 
 
 # EDAM formats by file name ending (most specific first), with their name and IANA media type

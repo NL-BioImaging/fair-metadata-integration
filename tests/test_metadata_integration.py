@@ -57,16 +57,24 @@ def make_bilayers_config(path: Path) -> Path:
 
 
 def make_ome_zarr_dirs(path: Path) -> tuple[Path, Path]:
-    """Create input/output ome-zarr directories under *path* and return them."""
+    """Create an input ome-zarr directory under *path*, and an output one in the crate at *path*/crate.
+
+    As a workflow does: it reads its input from wherever it is, and writes its output into the crate.
+    """
     input_zarr = path / "input.ome.zarr"
-    output_zarr = path / "output.ome.zarr"
-    # Nested content, so tests can check the whole tree is copied into the crate.
+    output_zarr = path / "crate" / "output.ome.zarr"
+    # Nested content, so tests can check the tree is not copied into the crate.
     (input_zarr / "0").mkdir(parents=True)
     (input_zarr / ".zattrs").write_text('{"multiscales": []}')
     (input_zarr / "0" / "0.0.0").write_bytes(b"\x01\x02\x03")
-    output_zarr.mkdir()
+    output_zarr.mkdir(parents=True)
     (output_zarr / ".zattrs").write_text('{"segmentation": true}')
     return input_zarr, output_zarr
+
+
+def uri(path: Path) -> str:
+    """The @id of data referenced from outside the crate: its file URI, with a '/' for a folder."""
+    return path.resolve().as_uri() + ("/" if path.is_dir() else "")
 
 
 def write_json(path: Path, content) -> None:
@@ -122,7 +130,7 @@ class TestCreateRoCrate:
         """create_ro_crate writes a valid RO-Crate with all expected entities."""
         input_zarr, output_zarr = ome_zarr_dirs
         dest = tmp_path / "crate"
-        dest.mkdir()
+        dest.mkdir(exist_ok=True)
 
         create_ro_crate(
             dest_path=str(dest),
@@ -145,12 +153,14 @@ class TestCreateRoCrate:
         assert any("config.yaml" in eid for eid in ids), (
             f"Bilayers config.yaml not found in crate entities: {ids}"
         )
+        # The input, outside the crate, is referenced by its file URI.
+        assert uri(input_zarr) in ids
 
     def test_workflow_ro_crate_profile(self, tmp_path, bilayers_config, ome_zarr_dirs):
         """The crate declares the Workflow RO-Crate profile correctly."""
         input_zarr, output_zarr = ome_zarr_dirs
         dest = tmp_path / "crate"
-        dest.mkdir()
+        dest.mkdir(exist_ok=True)
 
         create_ro_crate(
             dest_path=str(dest),
@@ -184,7 +194,7 @@ class TestCreateRoCrate:
                 )
 
         # Each dataset links back to the parameter it is an example of.
-        assert entities["input.ome.zarr/"]["exampleOfWork"] == {"@id": "#input"}
+        assert entities[uri(input_zarr)]["exampleOfWork"] == {"@id": "#input"}
         assert entities["output.ome.zarr/"]["exampleOfWork"] == {"@id": "#output"}
 
         # Parameters give their EDAM format with the Bioschemas encodingFormat property.
@@ -198,11 +208,11 @@ class TestCreateRoCrate:
         assert lang["name"] == "Bilayers"
         assert lang["@id"] == "https://doi.org/10.5281/zenodo.17652333"
 
-    def test_payload_files_are_copied_into_crate(self, tmp_path, bilayers_config, ome_zarr_dirs):
-        """Every entity in the crate is backed by a file that is actually there."""
+    def test_data_outside_the_crate_is_referenced_not_copied(self, tmp_path, bilayers_config, ome_zarr_dirs):
+        """Data inside the crate stays where it is; data outside it is referenced by its file URI."""
         input_zarr, output_zarr = ome_zarr_dirs
         dest = tmp_path / "crate"
-        dest.mkdir()
+        dest.mkdir(exist_ok=True)
 
         create_ro_crate(
             dest_path=str(dest),
@@ -212,27 +222,40 @@ class TestCreateRoCrate:
         )
 
         assert (dest / "config.yaml").read_text() == BILAYERS_CONFIG
-        # The zarr directories are copied whole, nested chunks included.
-        assert (dest / "input.ome.zarr" / ".zattrs").exists()
-        assert (dest / "input.ome.zarr" / "0" / "0.0.0").read_bytes() == b"\x01\x02\x03"
+        assert not (dest / "input.ome.zarr").exists()
         assert (dest / "output.ome.zarr" / ".zattrs").exists()
+        ids = self._read_ids(dest)
+        assert uri(input_zarr) in ids
+        assert "output.ome.zarr/" in ids
 
-        # No entity may describe a file that is missing from the crate.
-        for eid in self._read_ids(dest):
-            if eid.startswith("#") or eid.startswith("http") or eid == "./":
+        # Every entity with a relative @id is backed by a file that is actually in the crate.
+        for eid in ids:
+            if eid.startswith(("#", "http", "file:")) or eid == "./":
                 continue
             assert (dest / eid).exists(), f"entity '{eid}' has no file in the crate"
 
-    def test_file_input_and_outputs_are_copied_as_files(self, tmp_path, bilayers_config):
-        """Files (TIFF, CSV) are File entities with their content, not empty Dataset folders."""
+    def test_data_in_a_subfolder_of_the_crate_keeps_its_place(self, tmp_path, bilayers_config, ome_zarr_dirs):
+        input_zarr, _ = ome_zarr_dirs
+        dest = tmp_path / "crate"
+        table = dest / "tables" / "Nuclei.csv"
+        table.parent.mkdir(parents=True)
+        table.write_text("ObjectNumber,Area\n1,42\n")
+
+        create_ro_crate(str(dest), str(bilayers_config), str(input_zarr), [str(table)])
+
+        assert "tables/Nuclei.csv" in self._read_ids(dest)
+        assert not (dest / "Nuclei.csv").exists()
+
+    def test_file_input_and_outputs_are_files(self, tmp_path, bilayers_config):
+        """Files (TIFF, CSV) are File entities, not Dataset folders, inside the crate or referenced."""
         input_tiff = tmp_path / "input.tif"
         input_tiff.write_bytes(b"II*\x00input")
-        output_csv = tmp_path / "Nuclei.csv"
-        output_csv.write_text("ObjectNumber,Area\n1,42\n")
-        output_tiff = tmp_path / "labels.tiff"
-        output_tiff.write_bytes(b"II*\x00labels")
         dest = tmp_path / "crate"
-        dest.mkdir()
+        dest.mkdir(exist_ok=True)
+        output_csv = dest / "Nuclei.csv"
+        output_csv.write_text("ObjectNumber,Area\n1,42\n")
+        output_tiff = dest / "labels.tiff"
+        output_tiff.write_bytes(b"II*\x00labels")
 
         create_ro_crate(
             dest_path=str(dest),
@@ -241,20 +264,20 @@ class TestCreateRoCrate:
             output_paths=[str(output_csv), str(output_tiff)],
         )
 
-        assert (dest / "input.tif").read_bytes() == b"II*\x00input"
+        assert not (dest / "input.tif").exists()
         assert (dest / "Nuclei.csv").read_text() == "ObjectNumber,Area\n1,42\n"
         assert (dest / "labels.tiff").read_bytes() == b"II*\x00labels"
         entities = self._read_entities(dest)
-        for eid in ("input.tif", "Nuclei.csv", "labels.tiff"):
+        for eid in (uri(input_tiff), "Nuclei.csv", "labels.tiff"):
             assert entities[eid]["@type"] == "File"
         assert entities["labels.tiff"]["exampleOfWork"] == {"@id": "#output_2"}
 
     def test_encoding_format(self, tmp_path, bilayers_config, ome_zarr_dirs):
         """Files give their media type and EDAM format, folders their EDAM format; formats are WebPage entities."""
         input_zarr, _ = ome_zarr_dirs
-        output_csv = tmp_path / "Nuclei.csv"
-        output_csv.write_text("ObjectNumber,Area\n1,42\n")
         dest = tmp_path / "crate"
+        output_csv = dest / "Nuclei.csv"
+        output_csv.write_text("ObjectNumber,Area\n1,42\n")
 
         create_ro_crate(str(dest), str(bilayers_config), str(input_zarr), [str(output_csv)])
 
@@ -262,7 +285,7 @@ class TestCreateRoCrate:
         csv_format = "http://edamontology.org/format_3752"
         zarr_format = "http://edamontology.org/format_3915"
         assert entities["Nuclei.csv"]["encodingFormat"] == ["text/csv", {"@id": csv_format}]
-        assert entities["input.ome.zarr/"]["encodingFormat"] == {"@id": zarr_format}
+        assert entities[uri(input_zarr)]["encodingFormat"] == {"@id": zarr_format}
         assert entities[csv_format] == {"@id": csv_format, "@type": "WebPage", "name": "CSV"}
         assert entities[zarr_format] == {"@id": zarr_format, "@type": "WebPage", "name": "Zarr"}
         # The parameter refers to the EDAM format only.
@@ -286,13 +309,12 @@ class TestCreateRoCrate:
         """Each output dataset gets its own FormalParameter."""
         input_zarr = tmp_path / "input.ome.zarr"
         input_zarr.mkdir()
+        dest = tmp_path / "crate"
         outputs = []
         for name in ("a.ome.zarr", "b.ome.zarr"):
-            out = tmp_path / name
-            out.mkdir()
+            out = dest / name
+            out.mkdir(parents=True)
             outputs.append(str(out))
-        dest = tmp_path / "crate"
-        dest.mkdir()
 
         create_ro_crate(
             dest_path=str(dest),
@@ -354,9 +376,10 @@ class TestPreview:
 
     def test_preview_shows_csv_and_ome_zarr_details(self, tmp_path):
         input_zarr = make_ome_zarr_v2(tmp_path / "input.ome.zarr")
-        table = tmp_path / "Nuclei.csv"
-        table.write_text("ImageNumber,ObjectNumber,AreaShape_Area\n1,1,42.5\n1,2,40.0\n")
         dest = tmp_path / "crate"
+        dest.mkdir()
+        table = dest / "Nuclei.csv"
+        table.write_text("ImageNumber,ObjectNumber,AreaShape_Area\n1,1,42.5\n1,2,40.0\n")
 
         create_ro_crate(str(dest), str(make_bilayers_config(tmp_path)), str(input_zarr), [str(table)])
         page = (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
@@ -374,9 +397,10 @@ class TestPreview:
         """CSV and other text files link to an HTML view in ro-crate-preview_files/; binary files do not."""
         input_tiff = tmp_path / "input.tif"
         input_tiff.write_bytes(b"II*\x00\x00\x01binary")
-        table = tmp_path / "Nuclei.csv"
-        table.write_text("# header l,d\nObjectNumber,AreaShape_Area\n1,42.5\n2,<40>\n")
         dest = tmp_path / "crate"
+        dest.mkdir()
+        table = dest / "Nuclei.csv"
+        table.write_text("# header l,d\nObjectNumber,AreaShape_Area\n1,42.5\n2,<40>\n")
 
         create_ro_crate(str(dest), str(make_bilayers_config(tmp_path)), str(input_tiff), [str(table)])
         page = (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
@@ -384,8 +408,9 @@ class TestPreview:
         assert '<a href="ro-crate-preview_files/Nuclei.csv.html">view</a>' in page
         assert '<a href="Nuclei.csv">raw file</a>' in page
         assert '<a href="ro-crate-preview_files/config.yaml.html">view</a>' in page
-        assert '<a href="input.tif">open</a>' in page
-        assert not (dest / "ro-crate-preview_files" / "input.tif.html").exists()
+        # The referenced input links to where it is.
+        assert f'<a href="{uri(input_tiff)}">open</a>' in page
+        assert not any("input.tif" in view.name for view in (dest / "ro-crate-preview_files").iterdir())
 
         table_view = (dest / "ro-crate-preview_files" / "Nuclei.csv.html").read_text(encoding="utf-8")
         assert '<a href="../ro-crate-preview.html#Nuclei.csv">' in table_view
@@ -402,7 +427,8 @@ class TestPreview:
 
     def test_large_table_view_is_truncated(self, tmp_path, monkeypatch):
         monkeypatch.setattr("fair_metadata_integration.preview.MAX_VIEW_ROWS", 2)
-        table = tmp_path / "Image.csv"
+        table = tmp_path / "crate" / "Image.csv"
+        table.parent.mkdir()
         table.write_text("ImageNumber\n1\n2\n3\n")
 
         dest = self._make_crate(tmp_path, make_ome_zarr_v2(tmp_path / "input.ome.zarr"), [table])
@@ -464,8 +490,8 @@ class TestPreview:
     def _make_crate(tmp_path: Path, input_path: Path, output_paths: list[Path] | None = None) -> Path:
         dest = tmp_path / "crate"
         if output_paths is None:
-            output = tmp_path / "output.ome.zarr"
-            output.mkdir(exist_ok=True)
+            output = dest / "output.ome.zarr"
+            output.mkdir(parents=True, exist_ok=True)
             output_paths = [output]
         create_ro_crate(str(dest), str(make_bilayers_config(tmp_path)), str(input_path), [str(p) for p in output_paths])
         return dest
@@ -479,10 +505,13 @@ def make_example_crate(tmp_path: Path) -> Path:
     sources = tmp_path / "sources"
     sources.mkdir(parents=True, exist_ok=True)
 
+    dest = tmp_path / "output"
+    dest.mkdir(parents=True, exist_ok=True)
+
     bilayers_config = make_bilayers_config(sources)
     input_zarr = make_ome_zarr_v2(sources / "cells.ome.zarr")
-    output_labels = make_ome_zarr_v3(sources / "segmentation.ome.zarr")
-    output_csv = sources / "Nuclei.csv"
+    output_labels = make_ome_zarr_v3(dest / "segmentation.ome.zarr")
+    output_csv = dest / "Nuclei.csv"
     output_csv.write_text(
         "# header l,l,d,d,s\n"
         "ImageNumber,ObjectNumber,AreaShape_Area,Intensity_MeanIntensity_DAPI,FileName_DAPI\n"
@@ -490,7 +519,6 @@ def make_example_crate(tmp_path: Path) -> Path:
         "1,2,388.0,0.19,cells.ome.zarr\n"
         "1,3,455.0,0.24,cells.ome.zarr\n"
     )
-    dest = tmp_path / "output"
 
     create_ro_crate(
         dest_path=str(dest),

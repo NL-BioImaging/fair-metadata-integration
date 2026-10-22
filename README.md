@@ -25,8 +25,8 @@ from fair_metadata_integration import create_ro_crate
 create_ro_crate(
     dest_path="crate",
     workflow_schema_filename="config.yaml",
-    input_path="input.ome.zarr",
-    output_paths=["output.ome.zarr"],
+    input_path="data/input.ome.zarr",
+    output_paths=["crate/output.ome.zarr"],
 )
 ```
 
@@ -37,13 +37,14 @@ create_ro_crate(
 - `gen_preview` — write an `ro-crate-preview.html` alongside the metadata
   (default `True`).
 
-The source files are copied into the crate, so `dest_path` ends up
-self-contained:
+Only the workflow specification is copied into the crate. Data inside
+`dest_path`, such as the outputs the workflow wrote there, is part of the crate
+where it is. Data outside it, typically the original input, is not copied but
+referenced by its `file://` URI:
 
 ```
 crate/
 ├── config.yaml
-├── input.ome.zarr/
 ├── output.ome.zarr/
 ├── ro-crate-metadata.json
 └── ro-crate-preview.html
@@ -99,8 +100,9 @@ Bilayers specification, identified by its Zenodo concept DOI
 [`10.5281/zenodo.17652333`](https://doi.org/10.5281/zenodo.17652333), which
 resolves to the latest release of the spec.
 
-Folders (e.g. OME-Zarr) are `Dataset` entities, files `File` entities, copied
-with their content. Their `encodingFormat` is an [EDAM](https://edamontology.org/)
+Folders (e.g. OME-Zarr) are `Dataset` entities, files `File` entities, with a
+path relative to the crate when they are in it and their `file://` URI when
+they are not. Their `encodingFormat` is an [EDAM](https://edamontology.org/)
 format, from the file name: `format_3915` for Zarr, `format_3727` for OME-TIFF,
 `format_3591` for TIFF, and PNG, JPEG, HDF5, CSV, TSV, xlsx, JSON, YAML, XML and
 text. Files also give their IANA media type, and each EDAM format is a `WebPage`
