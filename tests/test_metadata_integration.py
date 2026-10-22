@@ -290,7 +290,8 @@ class TestCreateRoCrate:
         assert entities[zarr_format] == {"@id": zarr_format, "@type": "WebPage", "name": "Zarr"}
         # The parameter refers to the EDAM format only.
         assert entities["#output"]["encodingFormat"] == {"@id": csv_format}
-        assert not any("additionalType" in entity for entity in entities.values())
+        # Formats are not given as additionalType, which only gives the data type of parameter values.
+        assert not any("additionalType" in entity for entity in entities.values() if "encodingFormat" in entity)
 
     @pytest.mark.parametrize("name, edam", [
         ("image.ome.tiff", "format_3727"), ("image.OME.TIF", "format_3727"), ("image.tif", "format_3591"),
@@ -328,6 +329,67 @@ class TestCreateRoCrate:
         assert output_ids == ["#output", "#output_2"]
         assert entities["a.ome.zarr/"]["exampleOfWork"] == {"@id": "#output"}
         assert entities["b.ome.zarr/"]["exampleOfWork"] == {"@id": "#output_2"}
+
+    def test_run_is_described(self, tmp_path, bilayers_config, ome_zarr_dirs):
+        """The schema's parameters are FormalParameters; the run is a CreateAction of the workflow."""
+        input_zarr, output_zarr = ome_zarr_dirs
+        dest = tmp_path / "crate"
+
+        create_ro_crate(str(dest), str(bilayers_config), str(input_zarr), [str(output_zarr)])
+
+        entities = self._read_entities(dest)
+        assert {"@id": "#parameter-model"} in entities["config.yaml"]["input"]
+        assert entities["#parameter-model"] == {
+            "@id": "#parameter-model", "@type": "FormalParameter", "name": "model",
+            "additionalType": "Text", "valueRequired": True, "defaultValue": "MitoNet_v1_mini",
+        }
+        run = entities["#run"]
+        assert run["@type"] == "CreateAction"
+        assert run["instrument"] == {"@id": "config.yaml"}
+        assert run["object"] == [{"@id": uri(input_zarr)}]
+        assert run["result"] == [{"@id": "output.ome.zarr/"}]
+        assert {"@id": "#run"} in entities["./"]["mentions"]
+        for profile in ("https://w3id.org/ro/wfrun/process/0.5", "https://w3id.org/ro/wfrun/workflow/0.5"):
+            assert {"@id": profile} in entities["./"]["conformsTo"]
+            assert entities[profile]["@type"] == "CreativeWork"
+
+    def test_parameter_values_from_a_yaml_file(self, tmp_path, bilayers_config, ome_zarr_dirs):
+        """Values in a nested YAML file are PropertyValues of the run; the file is added to the crate."""
+        input_zarr, output_zarr = ome_zarr_dirs
+        dest = tmp_path / "crate"
+        values = tmp_path / "parameters.yaml"
+        values.write_text("segmentation:\n  model: MitoNet_v1\n  tiling:\n    tile_size: [512, 512]\n")
+
+        with pytest.warns(UserWarning, match="'segmentation.tiling.tile_size' is not a parameter"):
+            create_ro_crate(str(dest), str(bilayers_config), str(input_zarr), [str(output_zarr)],
+                            parameters=str(values))
+
+        entities = self._read_entities(dest)
+        assert entities["#value-model"] == {
+            "@id": "#value-model", "@type": "PropertyValue", "name": "model", "value": "MitoNet_v1",
+            "exampleOfWork": {"@id": "#parameter-model"},
+        }
+        unknown = entities["#value-segmentation.tiling.tile_size"]
+        assert unknown["value"] == "[512, 512]"
+        assert "exampleOfWork" not in unknown
+        assert entities["#run"]["object"] == [
+            {"@id": uri(input_zarr)}, {"@id": "#value-model"}, {"@id": "#value-segmentation.tiling.tile_size"},
+        ]
+        # The values file is copied into the crate, and describes the run.
+        assert (dest / "parameters.yaml").read_text() == values.read_text()
+        assert entities["parameters.yaml"]["about"] == {"@id": "#run"}
+
+    def test_parameter_values_from_a_mapping(self, tmp_path, bilayers_config, ome_zarr_dirs):
+        input_zarr, output_zarr = ome_zarr_dirs
+        dest = tmp_path / "crate"
+
+        create_ro_crate(str(dest), str(bilayers_config), str(input_zarr), [str(output_zarr)],
+                        parameters={"model": "MitoNet_v1"})
+
+        entities = self._read_entities(dest)
+        assert entities["#value-model"]["value"] == "MitoNet_v1"
+        assert {"@id": "#value-model"} in entities["#run"]["object"]
+        assert not any(eid.endswith((".yaml", ".json")) and eid not in ("config.yaml", "ro-crate-metadata.json") for eid in entities)
 
     @staticmethod
     def _read_entities(dest: Path) -> dict:
@@ -435,6 +497,19 @@ class TestPreview:
         assert "Command: <code>python -m empanada.inference</code>" in page
         assert "<tr><td>input_image</td><td>image</td><td>--image</td><td></td></tr>" in page
         assert "<tr><td>model</td><td>string</td><td>--model</td><td>MitoNet_v1_mini</td><td></td></tr>" in page
+
+    def test_preview_shows_parameter_values(self, tmp_path):
+        input_zarr = make_ome_zarr_v2(tmp_path / "input.ome.zarr")
+        dest = tmp_path / "crate"
+
+        create_ro_crate(str(dest), str(make_bilayers_config(tmp_path)), str(input_zarr),
+                        parameters={"model": "MitoNet_v1"})
+        page = (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
+
+        assert "<th>Default</th><th>Value</th><th>Description</th>" in page
+        assert "<tr><td>model</td><td>string</td><td>--model</td><td>MitoNet_v1_mini</td><td>MitoNet_v1</td><td></td></tr>" in page
+        # The inputs and outputs tables have no values.
+        assert "<tr><td>input_image</td><td>image</td><td>--image</td><td></td></tr>" in page
 
     def test_json_and_yaml_views_are_trees(self, tmp_path):
         """JSON and YAML files are shown as a collapsible tree; files that do not parse as plain text."""

@@ -67,7 +67,8 @@ class CratePreview(Preview):
 
         def section(entity, source=None):
             view = views.get(entity.id, (None,))[0]
-            return render_entity(entity.as_jsonld(), entities, anchors, terms, source, view)
+            jsonld = entity.as_jsonld()
+            return render_entity(jsonld, entities, anchors, terms, source, view, parameter_values(jsonld, entities))
 
         title = html.escape(str(root.get('name') or 'RO-Crate'))
         description = root.get('description')
@@ -156,7 +157,23 @@ def render_value(value, entities, anchors):
     return html.escape(text)
 
 
-def render_entity(entity, entities, anchors, extra_terms, source=None, view=None):
+def as_list(value):
+    return value if isinstance(value, list) else [] if value is None else [value]
+
+
+def parameter_values(entity, entities):
+    """Map the name of each input parameter of *entity* (a workflow) to the value a run gave it, if any."""
+    inputs = {ref['@id'] for ref in as_list(entity.get('input')) if isinstance(ref, dict)}
+    values = {}
+    for value in entities.values():
+        parameter = next((ref['@id'] for ref in as_list(value.get('exampleOfWork'))
+                          if isinstance(ref, dict) and ref.get('@id') in inputs), None)
+        if parameter and 'PropertyValue' in as_list(value.get('@type')):
+            values[entities[parameter].get('name')] = value.get('value')
+    return values
+
+
+def render_entity(entity, entities, anchors, extra_terms, source=None, view=None, values=None):
     entity_id = entity['@id']
     types = entity.get('@type', [])
     types = types if isinstance(types, list) else [types]
@@ -174,14 +191,17 @@ def render_entity(entity, entities, anchors, extra_terms, source=None, view=None
         f'<dt>{render_term(key, extra_terms)}</dt><dd>{render_value(value, entities, anchors)}</dd>'
         for key, value in entity.items() if key not in ('@id', '@type')
     )
-    details = render_details(source) if source is not None else ''
+    details = render_details(source, values) if source is not None else ''
     return (f'<section class="entity" id="{anchors[entity_id]}">'
             f'<h3>{html.escape(str(entity.get("name") or entity_id))}</h3>'
             f'<p class="meta">{" &middot; ".join(meta)}</p>{details}<dl>{rows}</dl></section>')
 
 
-def render_details(source):
-    """Content summary for a CSV/TSV file, a bilayers configuration or an OME-Zarr folder; empty if there is none."""
+def render_details(source, values=None):
+    """Content summary for a CSV/TSV file, a bilayers configuration or an OME-Zarr folder; empty if there is none.
+
+    *values* are the parameter values of a run of the bilayers configuration, by parameter name.
+    """
     try:
         path = Path(source)
         if path.is_file() and path.suffix.lower() in ('.csv', '.tsv'):
@@ -189,7 +209,7 @@ def render_details(source):
         if path.is_file() and path.suffix.lower() in STRUCTURED_SUFFIXES:
             details = bilayers_details(read_structured(path))
             if details:
-                return render_bilayers_details(details)
+                return render_bilayers_details(details, values)
         if path.is_dir():
             details = ome_zarr_details(path)
             if details:
@@ -232,7 +252,7 @@ def bilayers_details(config):
     }
 
 
-def render_bilayers_details(details):
+def render_bilayers_details(details, values=None):
     parts = ['<p><strong>Bilayers workflow</strong></p>']
     for citation in details['citations']:
         text = html.escape(str(citation.get('name') or ''))
@@ -250,21 +270,29 @@ def render_bilayers_details(details):
         parts.append(f'<p>Command: <code>{html.escape(str(details["command"]))}</code></p>')
     for key, title in (('inputs', 'Inputs'), ('outputs', 'Outputs'), ('parameters', 'Parameters')):
         if details[key]:
-            parts.append(f'<p>{title}:</p>' + render_bilayers_items(details[key], with_default=key == 'parameters'))
+            parameters = key == 'parameters'
+            parts.append(f'<p>{title}:</p>' + render_bilayers_items(details[key], with_default=parameters,
+                                                                    values=values if parameters else None))
     return '<div class="details">' + ''.join(parts) + '</div>'
 
 
-def render_bilayers_items(items, with_default=False):
-    """Table of the inputs, outputs or parameters of a bilayers configuration."""
-    columns = ['Name', 'Type', 'Option'] + (['Default'] if with_default else []) + ['Description']
+def render_bilayers_items(items, with_default=False, values=None):
+    """Table of the inputs, outputs or parameters of a bilayers configuration, with a run's *values* if given."""
+    columns = (['Name', 'Type', 'Option'] + (['Default'] if with_default else []) + (['Value'] if values else [])
+               + ['Description'])
     head = '<tr>' + ''.join(f'<th>{c}</th>' for c in columns) + '</tr>'
 
     def cell(value):
         return f'<td>{html.escape("" if value is None else str(value))}</td>'
 
+    def value_cell(name):
+        # A parameter the run gave no value has its default
+        return cell(values[name]) if name in values else '<td class="type">default</td>'
+
     rows = ''.join(
         '<tr>' + cell(item.get('name')) + cell(item.get('type')) + cell(item.get('cli_tag'))
         + (cell(item.get('default')) if with_default else '')
+        + (value_cell(str(item.get('name'))) if values else '')
         + cell(item.get('description') or item.get('label')) + '</tr>'
         for item in items
     )

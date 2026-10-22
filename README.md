@@ -27,6 +27,7 @@ create_ro_crate(
     workflow_schema_filename="config.yaml",
     input_path="data/input.ome.zarr",
     output_paths=["crate/output.ome.zarr"],
+    parameters="parameters.yaml",
 )
 ```
 
@@ -36,6 +37,20 @@ create_ro_crate(
 - `output_paths` — the images the workflow produced. Each gets its own parameter.
 - `gen_preview` — write an `ro-crate-preview.html` alongside the metadata
   (default `True`).
+- `parameters` — the values the run used for the parameters `config.yaml`
+  defines: the path of a YAML or JSON file, which is copied into the crate, or a
+  `dict`. Values can be grouped under keys of your own, to any depth; a key that
+  is one of the workflow's parameters is that parameter's value, wherever it is:
+
+  ```yaml
+  segmentation:
+    model: MitoNet_v1
+    tiling:
+      tile_size: 512
+  ```
+
+  A value whose key is not a parameter of the workflow is still recorded, under
+  its dotted path (e.g. `segmentation.tiling.tile_size`), with a warning.
 
 Only the workflow specification is copied into the crate. Data inside
 `dest_path`, such as the outputs the workflow wrote there, is part of the crate
@@ -60,14 +75,17 @@ definitions. Files and folders also get a summary of their content:
 
 - CSV and TSV files: number of rows and columns, and the column names (with
   their types, for CellProfiler's `# header` line).
+- The Bilayers `config.yaml`: citations, Docker image, command, and the
+  inputs, outputs and parameters, with the values the run gave the parameters.
 - OME-Zarr folders (Zarr v2 and v3): axes and units, the shape, chunks, data
   type and scale of each resolution level, channels, label images, and the plate
   layout or bioformats2raw image series.
 
 Text files, which a browser would download rather than show, link to a
 browsable view in `ro-crate-preview_files/`: CSV and TSV files as a table (the
-first 1,000 rows), other text files such as YAML or CellProfiler pipelines as
-text (the first 1,000,000 characters).
+first 1,000 rows), JSON and YAML files as a tree of keys and values you can
+collapse, and other text files such as CellProfiler pipelines as text (the first
+1,000,000 characters).
 
 The preview is described in the metadata as a `CreativeWork` `about` the root
 dataset, and is not part of the root dataset's `hasPart`.
@@ -76,7 +94,9 @@ dataset, and is not part of the root dataset's `hasPart`.
 
 The workflow specification is the crate's `mainEntity`, typed as a
 `ComputationalWorkflow`. The metadata descriptor declares RO-Crate 1.3, and the
-root dataset declares the Workflow RO-Crate 1.1 profile:
+root dataset declares the Workflow RO-Crate 1.1 profile, and the
+[Process Run Crate and Workflow Run Crate](https://www.researchobject.org/workflow-run-crate/)
+0.5 profiles for the run (not shown):
 
 ```json
 {
@@ -131,6 +151,41 @@ parameter it realises via `exampleOfWork`:
   "name": "CSV"
 }
 ```
+
+Each parameter `config.yaml` defines is a `FormalParameter` input of the
+workflow, with its data type (`additionalType`), description, default value and
+whether it is required. The run is a `CreateAction`, mentioned by the root
+dataset, with the workflow as `instrument`, the input data and parameter values
+as `object` and the output data as `result`. Each parameter value is a
+`PropertyValue` pointing at its parameter via `exampleOfWork`, and the
+parameters file is `about` the run:
+
+```json
+{
+  "@id": "#run",
+  "@type": "CreateAction",
+  "instrument": { "@id": "config.yaml" },
+  "object": [{ "@id": "file:///data/input.ome.zarr/" }, { "@id": "#value-model" }],
+  "result": [{ "@id": "output.ome.zarr/" }]
+},
+{
+  "@id": "#value-model",
+  "@type": "PropertyValue",
+  "name": "model",
+  "value": "MitoNet_v1",
+  "exampleOfWork": { "@id": "#parameter-model" }
+},
+{
+  "@id": "#parameter-model",
+  "@type": "FormalParameter",
+  "name": "model",
+  "additionalType": "Text",
+  "valueRequired": true,
+  "defaultValue": "MitoNet_v1_mini"
+}
+```
+
+Values that are lists or mappings are recorded as JSON text.
 
 The crate's JSON-LD context is extended with terms for describing biological
 imaging metadata — `biosample`, `specimen`, `organism_classification`,
