@@ -234,6 +234,29 @@ class TestCreateRoCrate:
                 continue
             assert (dest / eid).exists(), f"entity '{eid}' has no file in the crate"
 
+    def test_data_outside_the_crate_copied_on_request(self, tmp_path, bilayers_config):
+        """copy_input and copy_outputs copy data from outside the crate to its root."""
+        input_zarr, _ = make_ome_zarr_dirs(tmp_path)
+        staging = tmp_path / "staging"
+        output_zarr = staging / "labels.ome.zarr"
+        (output_zarr / "0").mkdir(parents=True)
+        (output_zarr / "0" / "0.0.0").write_bytes(b"\x04")
+        table = staging / "Nuclei.csv"
+        table.write_text("ObjectNumber,Area\n1,42\n")
+        dest = tmp_path / "crate"
+
+        create_ro_crate(str(dest), str(bilayers_config), str(input_zarr), [str(output_zarr), str(table)],
+                        copy_input=True, copy_outputs=True)
+
+        assert (dest / "input.ome.zarr" / "0" / "0.0.0").read_bytes() == b"\x01\x02\x03"
+        assert (dest / "labels.ome.zarr" / "0" / "0.0.0").read_bytes() == b"\x04"
+        assert (dest / "Nuclei.csv").read_text() == "ObjectNumber,Area\n1,42\n"
+        entities = self._read_entities(dest)
+        assert entities["input.ome.zarr/"]["exampleOfWork"] == {"@id": "#input"}
+        assert entities["labels.ome.zarr/"]["@type"] == "Dataset"
+        assert entities["Nuclei.csv"]["@type"] == "File"
+        assert not any(eid.startswith("file:") for eid in entities)
+
     def test_data_in_a_subfolder_of_the_crate_keeps_its_place(self, tmp_path, bilayers_config, ome_zarr_dirs):
         input_zarr, _ = ome_zarr_dirs
         dest = tmp_path / "crate"

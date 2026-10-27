@@ -17,11 +17,14 @@ WORKFLOW_RUN_CRATE = 'https://w3id.org/ro/wfrun/workflow/0.5'
 
 
 def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_paths=[], gen_preview=True,
-                    parameters=None):
+                    parameters=None, copy_input=False, copy_outputs=False):
     """Write a Workflow Run Crate to *dest_path* for a run of the bilayers workflow *workflow_schema_filename*.
 
     *parameters* are the values of the workflow's parameters in this run: a mapping, or
     the path of a YAML or JSON file of one, which is then also added to the crate.
+
+    Input and outputs outside *dest_path* are referenced by their file URI, unless
+    *copy_input* / *copy_outputs* is set: then they are copied to the crate root.
     """
     crate = ROCrate()
 
@@ -40,8 +43,8 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
         "specimen": "http://purl.obolibrary.org/obo/HSO_0000308",
     }
 
-    output_entities = [add_data_entity(crate, path, dest_path) for path in output_paths]
-    input_entity = add_data_entity(crate, input_path, dest_path)
+    output_entities = [add_data_entity(crate, path, dest_path, copy=copy_outputs) for path in output_paths]
+    input_entity = add_data_entity(crate, input_path, dest_path, copy=copy_input)
 
     # main=True sets the root dataset's mainEntity and adds the Workflow RO-Crate
     # profile to the root dataset's conformsTo.

@@ -51,11 +51,13 @@ create_ro_crate(
 
   A value whose key is not a parameter of the workflow is still recorded, under
   its dotted path (e.g. `segmentation.tiling.tile_size`), with a warning.
+- `copy_input`, `copy_outputs` — copy the input, or the outputs, into the crate
+  root when they are outside `dest_path` (default `False`: referenced, see below).
 
 Only the workflow specification is copied into the crate. Data inside
 `dest_path`, such as the outputs the workflow wrote there, is part of the crate
 where it is. Data outside it, typically the original input, is not copied but
-referenced by its `file://` URI:
+referenced by its `file://` URI (unless `copy_input` or `copy_outputs` is set):
 
 ```
 crate/
