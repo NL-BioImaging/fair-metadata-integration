@@ -25,18 +25,22 @@ from fair_metadata_integration import create_ro_crate
 create_ro_crate(
     dest_path="crate",
     workflow_schema_filename="config.yaml",
-    input_path="data/input.ome.zarr",
+    input_paths=["data/input.ome.zarr"],
     output_paths=["crate/output.ome.zarr"],
+    metadata_paths=["data/acquisition.json"],
     parameters="parameters.yaml",
 )
 ```
 
 - `dest_path` — directory the crate is written to, created if it does not exist.
 - `workflow_schema_filename` — the Bilayers `config.yaml` describing the workflow.
-- `input_path` — the input image (an OME-Zarr directory or a TIFF file).
-- `output_paths` — the images the workflow produced. Each gets its own parameter.
-- `gen_preview` — write an `ro-crate-preview.html` alongside the metadata
-  (default `True`).
+- `input_paths` — the data the workflow consumed (e.g. OME-Zarr directories or
+  TIFF files). Each gets its own parameter. A single input can also be given as
+  just its path.
+- `output_paths` — the data the workflow produced. Each gets its own parameter.
+- `metadata_paths` — further files describing the data, such as acquisition
+  metadata (typically text: JSON, YAML, XML, CSV). They are part of the crate,
+  and copied into its root when outside `dest_path`.
 - `parameters` — the values the run used for the parameters `config.yaml`
   defines: the path of a YAML or JSON file, which is copied into the crate, or a
   `dict`. Values can be grouped under keys of your own, to any depth; a key that
@@ -51,13 +55,33 @@ create_ro_crate(
 
   A value whose key is not a parameter of the workflow is still recorded, under
   its dotted path (e.g. `segmentation.tiling.tile_size`), with a warning.
-- `copy_input`, `copy_outputs` — copy the input, or the outputs, into the crate
+- `copy_inputs`, `copy_outputs` — copy the inputs, or the outputs, into the crate
   root when they are outside `dest_path` (default `False`: referenced, see below).
+- `gen_preview` — write an `ro-crate-preview.html` alongside the metadata
+  (default `True`).
 
-Only the workflow specification is copied into the crate. Data inside
-`dest_path`, such as the outputs the workflow wrote there, is part of the crate
-where it is. Data outside it, typically the original input, is not copied but
-referenced by its `file://` URI (unless `copy_input` or `copy_outputs` is set):
+### Command line
+
+The same is available as the `create-ro-crate` command (or
+`python -m fair_metadata_integration`):
+
+```bash
+create-ro-crate crate config.yaml \
+    --input data/input.ome.zarr \
+    --output crate/output.ome.zarr \
+    --metadata data/acquisition.json \
+    --parameters parameters.yaml
+```
+
+`--input`, `--output` and `--metadata` each take one or more paths;
+`--copy-inputs`, `--copy-outputs` and `--no-preview` match the arguments above.
+Run `create-ro-crate --help` for details.
+
+Only the workflow specification, the parameters file and metadata files are
+copied into the crate. Data inside `dest_path`, such as the outputs the workflow
+wrote there, is part of the crate where it is. Data outside it, typically the
+original input, is not copied but referenced by its `file://` URI (unless
+`copy_inputs` or `copy_outputs` is set):
 
 ```
 crate/

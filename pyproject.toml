@@ -26,6 +26,9 @@ dependencies = [
     "rocrate>=0.16.0",
 ]
 
+[project.scripts]
+create-ro-crate = "fair_metadata_integration.cli:main"
+
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
 

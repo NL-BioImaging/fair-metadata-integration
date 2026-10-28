@@ -16,16 +16,22 @@ PROCESS_RUN_CRATE = 'https://w3id.org/ro/wfrun/process/0.5'
 WORKFLOW_RUN_CRATE = 'https://w3id.org/ro/wfrun/workflow/0.5'
 
 
-def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_paths=[], gen_preview=True,
-                    parameters=None, copy_input=False, copy_outputs=False):
+def create_ro_crate(dest_path, workflow_schema_filename, input_paths, output_paths=[], metadata_paths=[],
+                    parameters=None, copy_inputs=False, copy_outputs=False, gen_preview=True):
     """Write a Workflow Run Crate to *dest_path* for a run of the bilayers workflow *workflow_schema_filename*.
+
+    *input_paths* and *output_paths* are the data the run consumed and produced; a single
+    input can also be given as just its path. *metadata_paths* are further files describing
+    the data (e.g. acquisition metadata), which are copied into the crate.
 
     *parameters* are the values of the workflow's parameters in this run: a mapping, or
     the path of a YAML or JSON file of one, which is then also added to the crate.
 
-    Input and outputs outside *dest_path* are referenced by their file URI, unless
-    *copy_input* / *copy_outputs* is set: then they are copied to the crate root.
+    Inputs and outputs outside *dest_path* are referenced by their file URI, unless
+    *copy_inputs* / *copy_outputs* is set: then they are copied to the crate root.
     """
+    if isinstance(input_paths, (str, os.PathLike)):
+        input_paths = [input_paths]
     crate = ROCrate()
 
     crate.metadata.extra_terms = {
@@ -44,7 +50,9 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
     }
 
     output_entities = [add_data_entity(crate, path, dest_path, copy=copy_outputs) for path in output_paths]
-    input_entity = add_data_entity(crate, input_path, dest_path, copy=copy_input)
+    input_entities = [add_data_entity(crate, path, dest_path, copy=copy_inputs) for path in input_paths]
+    for path in metadata_paths:
+        add_data_entity(crate, path, dest_path, copy=True)
 
     # main=True sets the root dataset's mainEntity and adds the Workflow RO-Crate
     # profile to the root dataset's conformsTo.
@@ -55,12 +63,10 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
     # The Workflow RO-Crate profile ranges input/output over FormalParameter rather
     # than over the data entities themselves; each data entity is linked back to its
     # parameter with exampleOfWork.
-    workflow['input'] = [add_formal_parameter(crate, input_entity, 'input')]
+    if input_entities:
+        workflow['input'] = add_formal_parameters(crate, input_entities, 'input')
     if output_entities:
-        workflow['output'] = [
-            add_formal_parameter(crate, entity, 'output' if i == 0 else f'output_{i + 1}')
-            for i, entity in enumerate(output_entities)
-        ]
+        workflow['output'] = add_formal_parameters(crate, output_entities, 'output')
     schema_parameters = add_schema_parameters(crate, read_yaml(workflow_schema_filename))
     workflow.append_to('input', list(schema_parameters.values()))
 
@@ -68,7 +74,8 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_path, output_path
     # object, the output data as result.
     run = crate.add(ContextEntity(crate, '#run', {'@type': 'CreateAction', 'name': f'Run of {workflow.id}'}))
     run['instrument'] = workflow
-    run['object'] = [input_entity]
+    if input_entities:
+        run['object'] = input_entities
     if output_entities:
         run['result'] = output_entities
     if parameters is not None:
@@ -243,6 +250,12 @@ def get_bilayers_language(crate):
             'url': {'@id': 'https://github.com/bilayer-containers/bilayers'},
         },
     ))
+
+
+def add_formal_parameters(crate, data_entities, name):
+    """Add a FormalParameter for each of *data_entities*: *name*, then *name*_2, *name*_3, ..."""
+    return [add_formal_parameter(crate, entity, name if i == 0 else f'{name}_{i + 1}')
+            for i, entity in enumerate(data_entities)]
 
 
 def add_formal_parameter(crate, data_entity, name):
