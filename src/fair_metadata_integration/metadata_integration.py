@@ -22,7 +22,7 @@ def create_ro_crate(dest_path, workflow_schema_filename, input_paths, output_pat
 
     *input_paths* and *output_paths* are the data the run consumed and produced; a single
     input can also be given as just its path. *metadata_paths* are further files describing
-    the data (e.g. acquisition metadata), which are copied into the crate.
+    the data, which are copied into the crate.
 
     *parameters* are the values of the workflow's parameters in this run: a mapping, or
     the path of a YAML or JSON file of one, which is then also added to the crate.

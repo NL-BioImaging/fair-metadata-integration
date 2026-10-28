@@ -27,7 +27,7 @@ create_ro_crate(
     workflow_schema_filename="config.yaml",
     input_paths=["data/input.ome.zarr"],
     output_paths=["crate/output.ome.zarr"],
-    metadata_paths=["data/acquisition.json"],
+    metadata_paths=["data/metadata.yaml"],
     parameters="parameters.yaml",
 )
 ```
@@ -38,8 +38,8 @@ create_ro_crate(
   TIFF files). Each gets its own parameter. A single input can also be given as
   just its path.
 - `output_paths` — the data the workflow produced. Each gets its own parameter.
-- `metadata_paths` — further files describing the data, such as acquisition
-  metadata (typically text: JSON, YAML, XML, CSV). They are part of the crate,
+- `metadata_paths` — further files describing the data
+  (typically text: JSON, YAML, XML, CSV). They are part of the crate,
   and copied into its root when outside `dest_path`.
 - `parameters` — the values the run used for the parameters `config.yaml`
   defines: the path of a YAML or JSON file, which is copied into the crate, or a
@@ -69,7 +69,7 @@ The same is available as the `create-ro-crate` command (or
 create-ro-crate crate config.yaml \
     --input data/input.ome.zarr \
     --output crate/output.ome.zarr \
-    --metadata data/acquisition.json \
+    --metadata data/metadata.yaml \
     --parameters parameters.yaml
 ```
 
