@@ -74,7 +74,7 @@ create-ro-crate crate config.yaml \
 ```
 
 `--input`, `--output` and `--metadata` each take one or more paths;
-`--copy-inputs`, `--copy-outputs` and `--no-preview` match the arguments above.
+`--copy-inputs`, `--copy-outputs` and `--gen-preview` / `--no-gen-preview` match the arguments above.
 Run `create-ro-crate --help` for details.
 
 Only the workflow specification, the parameters file and metadata files are

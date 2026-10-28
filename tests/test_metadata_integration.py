@@ -425,7 +425,7 @@ class TestCreateRoCrate:
         values.write_text("model: MitoNet_v1\n")
 
         main([str(dest), str(bilayers_config), "-i", str(input_zarr), "-o", str(output_zarr),
-              "-m", str(metadata), "-p", str(values), "--copy-inputs", "--no-preview"])
+              "-m", str(metadata), "-p", str(values), "--copy-inputs", "--no-gen-preview"])
 
         assert str(dest) in capsys.readouterr().out
         entities = self._read_entities(dest)

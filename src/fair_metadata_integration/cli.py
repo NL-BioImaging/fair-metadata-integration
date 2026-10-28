@@ -22,8 +22,8 @@ def parse_args(args=None):
                         help='copy inputs outside the crate into it, rather than referencing them')
     parser.add_argument('--copy-outputs', action='store_true',
                         help='copy outputs outside the crate into it, rather than referencing them')
-    parser.add_argument('--no-preview', dest='gen_preview', action='store_false',
-                        help='do not write ro-crate-preview.html')
+    parser.add_argument('--gen-preview', action=argparse.BooleanOptionalAction, default=True,
+                        help='write ro-crate-preview.html (default: yes)')
     return parser.parse_args(args)
 
 
