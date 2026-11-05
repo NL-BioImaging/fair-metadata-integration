@@ -105,8 +105,8 @@ def parameter_entry(name, value, choices=None):
 
 
 def template_entries(config):
-    """The inputs, outputs and parameters entries of the Bilayers *config*, each with a name."""
-    return [entry for key in ('inputs', 'outputs', 'parameters') for entry in (config or {}).get(key) or []
+    """The inputs, outputs, parameters and display-only entries of the Bilayers *config*, each with a name."""
+    return [entry for key in ('inputs', 'outputs', 'parameters', 'display_only') for entry in (config or {}).get(key) or []
             if isinstance(entry, dict) and entry.get('name')]
 
 
