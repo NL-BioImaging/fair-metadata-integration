@@ -35,26 +35,26 @@ create_ro_crate(
 - `dest_path` — directory the crate is written to, created if it does not exist.
 - `workflow_schema_filename` — the Bilayers `config.yaml` describing the workflow.
 - `input_paths` — the data the workflow consumed (e.g. OME-Zarr directories or
-  TIFF files). Each gets its own parameter. A single input can also be given as
-  just its path.
-- `output_paths` — the data the workflow produced. Each gets its own parameter.
+  TIFF files). A single input can also be given as just its path.
+- `output_paths` — the data the workflow produced.
 - `metadata_paths` — further files describing the data
   (typically text: JSON, YAML, XML, CSV). They are part of the crate,
   and copied into its root when outside `dest_path`.
-- `parameters` — the values the run used for the parameters `config.yaml`
-  defines: the path of a YAML or JSON file, which is copied into the crate, or a
-  `dict`. Values can be grouped under keys of your own, to any depth; a key that
-  is one of the workflow's parameters is that parameter's value, wherever it is:
+- `parameters` — the values the run used: the path of a YAML or JSON file, which
+  is copied into the crate, or a `dict`, which is written to `parameters.yaml` in
+  it. The file is `about` the run; its values are not entities of the crate.
+  They are nested as `config.yaml` is: an entry with a `section_id` has its value
+  under that key, so one name can be used in several sections:
 
   ```yaml
-  segmentation:
-    model: MitoNet_v1
-    tiling:
-      tile_size: 512
+  pre_processing:
+    normalisation: none
+  registration:
+    normalisation: true
   ```
 
-  A value whose key is not a parameter of the workflow is still recorded, under
-  its dotted path (e.g. `segmentation.tiling.tile_size`), with a warning.
+  Every value is kept; values at no entry of `config.yaml` are listed in one
+  warning (e.g. `registration.tiling`).
 - `copy_inputs`, `copy_outputs` — copy the inputs, or the outputs, into the crate
   root when they are outside `dest_path` (default `False`: referenced, see below).
 - `gen_preview` — write an `ro-crate-preview.html` alongside the metadata
@@ -65,6 +65,10 @@ create_ro_crate(
   `conformsTo` link to it.
 - `ome_version` — when `dest_path` is itself an OME-Zarr store, the OME-NGFF
   version it conforms to (default: the version the store states; see below).
+- `run_name`, `start_time`, `end_time` — the name of the run, and when it started
+  and ended (datetimes or ISO text).
+- `software` — the software implementing the workflow, as a `dict` of its `name`
+  and optionally its `url` and `version`; the workflow `isPartOf` it.
 
 `workflow_schema_filename` is optional: without it, the crate describes just the
 data — the root dataset with the inputs, outputs and metadata files as its
@@ -96,6 +100,34 @@ format, the OME-NGFF version it conforms to — `ome_version`, or else the one t
 store states (a warning if they differ, or if neither is known) — and a
 `description`, by default "OME-Zarr image", or "OME-Zarr image with labels".
 The metadata files must be in the store; they are `about` the store.
+
+Where the store came from, as the Process Run Crate profile models it:
+
+```python
+create_zarr_ro_crate(
+    "fused.ome.zarr",
+    source_paths=["tiles/tile1.tif", "tiles/tile2.tif"],
+    acquisition_metadata=[tile1_metadata, tile2_metadata],
+    derivation={"name": "Fusion to OME-Zarr", "end_time": "2026-11-05T16:00:00",
+                "software": {"name": "muvis-align", "url": "https://github.com/ccp-volume-em/muvis-align",
+                             "version": "1.2"}},
+    measurements={"ncc": 0.75, "nmi": {"value": 0.5, "description": "Registration NMI"}},
+)
+```
+
+- `source_paths` — the images the store was made from: the store `isBasedOn`
+  them, referenced by their `file://` URI and not part of the store.
+- `acquisition_metadata` — metadata of (some of) the sources, as `dict`s: an
+  `Image acquisition` `CreateAction` (`#acquisition`) with the sources as
+  `result`, an `IndividualProduct` instrument from the manufacturer, model and
+  serial number found in it (preferring fields under an instrument, microscope
+  or device), and the earliest and latest acquisition date as start and end time.
+  Keys are matched ignoring case and separators (`SerialNumber`, `serial_number`).
+- `derivation` — how the store was made: a `CreateAction` (`#derivation`) with
+  the sources as `object`, the store as `result` and the software as
+  `instrument`; its end time is the store's `datePublished`.
+- `measurements` — values measured on the store, as `PropertyValue`s of its
+  `variableMeasured`: a value, or a `dict` of its `value`, `description` and `unit`.
 
 ### Helpers for writing a run's files
 
@@ -148,7 +180,9 @@ create-ro-crate crate config.yaml \
 ```
 
 `--input`, `--output` and `--metadata` each take one or more paths;
-`--copy-inputs`, `--copy-outputs` and `--gen-preview` / `--no-gen-preview` match the arguments above.
+`--copy-inputs`, `--copy-outputs`, `--run-name`, `--start-time`, `--end-time`,
+`--software NAME [URL [VERSION]]` and `--gen-preview` / `--no-gen-preview` match
+the arguments above.
 Run `create-ro-crate --help` for details.
 
 Only the workflow specification, the parameters file and metadata files are
@@ -169,14 +203,15 @@ crate/
 [RO-Crate Website](https://www.researchobject.org/ro-crate/specification/1.3/structure.html)
 for the crate: a static HTML page (no scripts) with a section for every entity
 and all its properties. References between entities link to each other's
-section, so you can follow e.g. the workflow to an output parameter and on to the
-file it describes; external URIs, types and property names link to their
+section, so you can follow e.g. the run to the workflow and on to the files it
+produced; external URIs, types and property names link to their
 definitions. Files and folders also get a summary of their content:
 
 - CSV and TSV files: number of rows and columns, and the column names (with
   their types, for CellProfiler's `# header` line).
 - The Bilayers `config.yaml`: citations, Docker image, command, and the
-  inputs, outputs and parameters, with the values the run gave the parameters.
+  inputs, outputs and parameters, with the values the run gave the parameters
+  (read from the parameters file).
 - OME-Zarr folders (Zarr v2 and v3): axes and units, the shape, chunks, data
   type and scale of each resolution level, channels, label images, and the plate
   layout or bioformats2raw image series.
@@ -228,64 +263,26 @@ format, from the file name: `format_3915` for Zarr, `format_3727` for OME-TIFF,
 text. Files also give their IANA media type, and each EDAM format is a `WebPage`
 contextual entity with its name, as RO-Crate recommends.
 
-Inputs and outputs are modelled as `FormalParameter` entities, whose
-`encodingFormat` is the same EDAM format. Each data entity points back at the
-parameter it realises via `exampleOfWork`:
-
-```json
-{
-  "@id": "Nuclei.csv",
-  "@type": "File",
-  "encodingFormat": ["text/csv", { "@id": "http://edamontology.org/format_3752" }],
-  "exampleOfWork": { "@id": "#output" }
-},
-{
-  "@id": "#output",
-  "@type": "FormalParameter",
-  "name": "output",
-  "encodingFormat": { "@id": "http://edamontology.org/format_3752" }
-},
-{
-  "@id": "http://edamontology.org/format_3752",
-  "@type": "WebPage",
-  "name": "CSV"
-}
-```
-
-Each parameter `config.yaml` defines is a `FormalParameter` input of the
-workflow, with its data type (`additionalType`), description, default value and
-whether it is required. The run is a `CreateAction`, mentioned by the root
-dataset, with the workflow as `instrument`, the input data and parameter values
-as `object` and the output data as `result`. Each parameter value is a
-`PropertyValue` pointing at its parameter via `exampleOfWork`, and the
-parameters file is `about` the run:
+The run is a `CreateAction`, mentioned by the root dataset, with the workflow
+as `instrument`, the input data as `object` and the output data as `result`. The
+workflow's parameters and the run's values are not entities of the crate: they
+are in `config.yaml` and the parameters file, which is `about` the run:
 
 ```json
 {
   "@id": "#run",
   "@type": "CreateAction",
+  "name": "Run of config.yaml",
   "instrument": { "@id": "config.yaml" },
-  "object": [{ "@id": "file:///data/input.ome.zarr/" }, { "@id": "#value-model" }],
+  "object": [{ "@id": "file:///data/input.ome.zarr/" }],
   "result": [{ "@id": "output.ome.zarr/" }]
 },
 {
-  "@id": "#value-model",
-  "@type": "PropertyValue",
-  "name": "model",
-  "value": "MitoNet_v1",
-  "exampleOfWork": { "@id": "#parameter-model" }
-},
-{
-  "@id": "#parameter-model",
-  "@type": "FormalParameter",
-  "name": "model",
-  "additionalType": "Text",
-  "valueRequired": true,
-  "defaultValue": "MitoNet_v1_mini"
+  "@id": "parameters.yaml",
+  "@type": "File",
+  "about": { "@id": "#run" }
 }
 ```
-
-Values that are lists or mappings are recorded as JSON text.
 
 The crate's JSON-LD context is extended with terms for describing biological
 imaging metadata — `biosample`, `specimen`, `organism_classification`,
