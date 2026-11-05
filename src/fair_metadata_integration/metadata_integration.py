@@ -11,6 +11,7 @@ from rocrate.model import ComputerLanguage, ContextEntity
 from .bilayers import unknown_value_names
 from .files import write_parameters
 from .preview import CratePreview, zarr_attributes
+from .provenance import add_acquisition, add_action_times, add_derivation, add_measurements, add_software
 
 # Workflow Run Crate: the crate also describes a run of the workflow, with its parameter values
 PROCESS_RUN_CRATE = 'https://w3id.org/ro/wfrun/process/0.5'
@@ -31,12 +32,14 @@ EXTRA_TERMS = {
     "biosample": "http://purl.obolibrary.org/obo/OBI_0002648",
     "preparation_method": "https://www.wikidata.org/wiki/Property:P1537",
     "specimen": "http://purl.obolibrary.org/obo/HSO_0000308",
+    "BioChemEntity": "https://schema.org/BioChemEntity",
 }
 
 
 def create_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), output_paths=(), metadata_paths=(),
                     parameters=None, copy_inputs=False, copy_outputs=False, gen_preview=True,
-                    name=None, description=None, metadata_conforms_to=None, ome_version=None):
+                    name=None, description=None, metadata_conforms_to=None, ome_version=None,
+                    run_name=None, start_time=None, end_time=None, software=None):
     """Write an RO-Crate to *dest_path*; return the crate.
 
     With a bilayers workflow *workflow_schema_filename* it is a Workflow Run Crate for a run
@@ -58,16 +61,21 @@ def create_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), ou
     is the schema the metadata files follow, as a mapping of its 'url' and optionally its
     'name' and 'version'. When *dest_path* is an OME-Zarr store, the root dataset conforms
     to its OME-NGFF version: *ome_version*, or else the one the store states.
+
+    *run_name*, *start_time* and *end_time* (datetimes or ISO text) describe the run;
+    *software* is what implements the workflow, as a mapping of its 'name' and optionally
+    its 'url' and 'version'.
     """
     crate = build_ro_crate(dest_path, workflow_schema_filename, input_paths, output_paths, metadata_paths,
                            parameters, copy_inputs, copy_outputs, gen_preview, name, description,
-                           metadata_conforms_to, ome_version)
+                           metadata_conforms_to, ome_version, run_name, start_time, end_time, software)
     crate.write(dest_path)
     return crate
 
 
 def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=None, description=None,
-                         ome_version=None, gen_preview=True):
+                         ome_version=None, gen_preview=True, source_paths=(), acquisition_metadata=(),
+                         derivation=None, measurements=None):
     """Write an RO-Crate into the existing OME-Zarr store *store_path*, describing it; return the crate.
 
     Only ro-crate-metadata.json (and, with *gen_preview*, the preview) is written: the store
@@ -78,6 +86,13 @@ def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=Non
     *metadata_paths* are files in the store describing it, e.g. its acquisition metadata;
     *metadata_conforms_to* is the schema they follow, as a mapping of its 'url' and
     optionally its 'name' and 'version'.
+
+    Where the store came from: *source_paths* are the images it was made from, which it is
+    based on; *acquisition_metadata* is the metadata of (some of) those images, as mappings,
+    in which the instrument and acquisition times are looked up; *derivation* is how it was
+    made from them, as a mapping of its 'name', and optionally its 'software' (a mapping of
+    'name', 'url' and 'version'), 'start_time' and 'end_time'; *measurements* map the names
+    of values measured on it to a value, or to a mapping of its 'value', 'description' and 'unit'.
     """
     if not os.path.isdir(store_path):
         raise ValueError(f'{store_path} is not an existing OME-Zarr store')
@@ -92,13 +107,26 @@ def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=Non
                            metadata_conforms_to=metadata_conforms_to, ome_version=ome_version)
     for path in metadata_paths:
         crate.get(relative_path_inside(path, store_path))['about'] = crate.root_dataset
+    root = crate.root_dataset
+    sources = [add_source_entity(crate, path) for path in source_paths]
+    if sources:
+        root['isBasedOn'] = sources
+    if acquisition_metadata:
+        add_acquisition(crate, acquisition_metadata, sources or root)
+    if derivation:
+        action = add_derivation(crate, derivation, sources, root)
+        if action.get('endTime'):
+            root['datePublished'] = action['endTime']
+    if measurements:
+        add_measurements(crate, measurements, root)
     crate.write(store_path)
     return crate
 
 
 def build_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), output_paths=(), metadata_paths=(),
                    parameters=None, copy_inputs=False, copy_outputs=False, gen_preview=True,
-                   name=None, description=None, metadata_conforms_to=None, ome_version=None):
+                   name=None, description=None, metadata_conforms_to=None, ome_version=None,
+                   run_name=None, start_time=None, end_time=None, software=None):
     """The crate :func:`create_ro_crate` writes, not written yet."""
     if parameters is not None and workflow_schema_filename is None:
         raise ValueError('Parameter values need a workflow to be the values of')
@@ -121,14 +149,16 @@ def build_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), out
             entity['conformsTo'] = schema
 
     if workflow_schema_filename is not None:
-        add_workflow_run(crate, workflow_schema_filename, input_entities, output_entities, parameters, dest_path)
+        add_workflow_run(crate, workflow_schema_filename, input_entities, output_entities, parameters, dest_path,
+                         run_name, start_time, end_time, software)
 
     if gen_preview:
         crate.add(CratePreview(crate))
     return crate
 
 
-def add_workflow_run(crate, workflow_schema_filename, input_entities, output_entities, parameters, dest_path):
+def add_workflow_run(crate, workflow_schema_filename, input_entities, output_entities, parameters, dest_path,
+                     run_name=None, start_time=None, end_time=None, software=None):
     """Add the bilayers workflow and a run of it, which consumed *input_entities* and produced *output_entities*.
 
     The run's parameter values are not entities of the crate: the file holding them is, about the run.
@@ -140,8 +170,12 @@ def add_workflow_run(crate, workflow_schema_filename, input_entities, output_ent
                                   main=True, lang=get_bilayers_language(crate))
 
     # The run itself: the workflow as instrument, the input data as object, the output data as result.
-    run = crate.add(ContextEntity(crate, '#run', {'@type': 'CreateAction', 'name': f'Run of {workflow.id}'}))
+    if software:
+        workflow['isPartOf'] = add_software(crate, software)
+    run = crate.add(ContextEntity(crate, '#run', {'@type': 'CreateAction',
+                                                  'name': run_name or f'Run of {workflow.id}'}))
     run['instrument'] = workflow
+    add_action_times(run, start_time, end_time)
     if input_entities:
         run['object'] = input_entities
     if output_entities:
@@ -243,10 +277,25 @@ def add_data_entity(crate, path, crate_path, copy=False):
         entity = add(source=Path(path).resolve().as_uri(), properties=properties)
     else:
         entity = add(source=path, dest_path=rel_path, properties=properties)
+    add_ngff_conformance(crate, entity, path)
+    return entity
+
+
+def add_source_entity(crate, path):
+    """Data something was made from, referenced by its file URI but not part of the crate."""
+    uri = Path(path).resolve().as_uri() + ('/' if os.path.isdir(path) else '')
+    properties = {'@type': 'Dataset' if os.path.isdir(path) else 'File',
+                  **(get_encoding_format_property(crate, str(path)) or {})}
+    entity = crate.add(ContextEntity(crate, uri, properties))
+    add_ngff_conformance(crate, entity, path)
+    return entity
+
+
+def add_ngff_conformance(crate, entity, path):
+    """An OME-Zarr store conforms to the OME-NGFF version it states."""
     ome_version = get_ome_zarr_version(path) if os.path.isdir(path) else None
     if ome_version:
         entity.append_to('conformsTo', add_ngff_entity(crate, ome_version))
-    return entity
 
 
 def read_yaml(path):

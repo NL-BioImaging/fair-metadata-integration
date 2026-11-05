@@ -399,7 +399,8 @@ class TestCreateRoCrate:
         values.write_text("model: MitoNet_v1\n")
 
         main([str(dest), str(bilayers_config), "-i", str(input_zarr), "-o", str(output_zarr),
-              "-m", str(metadata), "-p", str(values), "--copy-inputs", "--no-gen-preview"])
+              "-m", str(metadata), "-p", str(values), "--copy-inputs", "--no-gen-preview",
+              "--run-name", "Segmentation", "--end-time", "2026-11-05T16:00:00", "--software", "empanada"])
 
         assert str(dest) in capsys.readouterr().out
         entities = self._read_entities(dest)
@@ -407,7 +408,29 @@ class TestCreateRoCrate:
         assert entities["#run"]["result"] == [{"@id": "output.ome.zarr/"}]
         assert "acquisition.yaml" in entities
         assert entities["parameters.yaml"]["about"] == {"@id": "#run"}
+        assert entities["#run"]["name"] == "Segmentation"
+        assert entities["#run"]["endTime"] == "2026-11-05T16:00:00"
+        assert entities["#software-empanada"]["name"] == "empanada"
         assert not (dest / "ro-crate-preview.html").exists()
+
+    def test_run_details_and_software(self, tmp_path, bilayers_config, ome_zarr_dirs):
+        from datetime import datetime
+
+        input_zarr, output_zarr = ome_zarr_dirs
+        dest = tmp_path / "crate"
+        software = {"name": "muvis-align", "url": "https://github.com/ccp-volume-em/muvis-align", "version": "1.2"}
+
+        create_ro_crate(str(dest), str(bilayers_config), [str(input_zarr)], [str(output_zarr)], gen_preview=False,
+                        run_name="muvis-align run", start_time=datetime(2026, 11, 5, 15), end_time="2026-11-05T16:00:00",
+                        software=software)
+
+        entities = self._read_entities(dest)
+        run = entities["#run"]
+        assert (run["name"], run["startTime"], run["endTime"]) == (
+            "muvis-align run", "2026-11-05T15:00:00", "2026-11-05T16:00:00")
+        assert entities["config.yaml"]["isPartOf"] == {"@id": software["url"]}
+        assert entities[software["url"]] == {"@id": software["url"], "@type": "SoftwareApplication",
+                                             "name": "muvis-align", "url": software["url"], "softwareVersion": "1.2"}
 
     def test_run_is_described(self, tmp_path, bilayers_config, ome_zarr_dirs):
         """The run is a CreateAction of the workflow, on the input data, with the output data as result."""

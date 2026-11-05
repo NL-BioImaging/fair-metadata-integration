@@ -22,6 +22,11 @@ def parse_args(args=None):
                         help='copy inputs outside the crate into it, rather than referencing them')
     parser.add_argument('--copy-outputs', action='store_true',
                         help='copy outputs outside the crate into it, rather than referencing them')
+    parser.add_argument('--run-name', help='name of the run')
+    parser.add_argument('--start-time', help='when the run started, as ISO date and time')
+    parser.add_argument('--end-time', help='when the run ended, as ISO date and time')
+    parser.add_argument('--software', nargs='+', metavar=('NAME', 'URL VERSION'),
+                        help='the software implementing the workflow: its name, and optionally its URL and version')
     parser.add_argument('--gen-preview', action=argparse.BooleanOptionalAction, default=True,
                         help='write ro-crate-preview.html (default: yes)')
     return parser.parse_args(args)
@@ -31,7 +36,9 @@ def main(args=None):
     args = parse_args(args)
     create_ro_crate(args.dest_path, args.workflow_schema, args.input_paths, args.output_paths, args.metadata_paths,
                     parameters=args.parameters, copy_inputs=args.copy_inputs, copy_outputs=args.copy_outputs,
-                    gen_preview=args.gen_preview)
+                    gen_preview=args.gen_preview, run_name=args.run_name, start_time=args.start_time,
+                    end_time=args.end_time,
+                    software=dict(zip(('name', 'url', 'version'), args.software)) if args.software else None)
     print(f'RO-Crate written to {args.dest_path}')
 
 

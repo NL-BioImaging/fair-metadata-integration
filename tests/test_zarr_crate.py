@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from fair_metadata_integration import create_ro_crate, create_zarr_ro_crate, get_ome_zarr_version
+from fair_metadata_integration.provenance import find_metadata_value
 from test_metadata_integration import make_bilayers_config, make_ome_zarr_v2, make_ome_zarr_v3, write_json
 
 NGFF_05 = 'https://ngff.openmicroscopy.org/0.5/'
@@ -138,3 +139,83 @@ class TestCreateZarrRoCrate:
         outside.write_text('a: 1\n')
         with pytest.raises(ValueError):
             create_zarr_ro_crate(store, [outside])
+
+
+OME_METADATA = {'Instrument': {'Microscope': {'Manufacturer': 'Zeiss', 'Model': 'Crossbeam', 'SerialNumber': 1234}},
+                'Image': {'Name': 'tile', 'AcquisitionDate': '2026-01-02T03:04:05'}}
+TIFF_METADATA = {'Make': 'FEI', 'Model': 'Helios', 'DateTime': '2026:01:02 04:00:00'}
+SOFTWARE = {'name': 'muvis-align', 'url': 'https://github.com/ccp-volume-em/muvis-align', 'version': '1.2'}
+
+
+class TestStoreProvenance:
+    def test_sources_acquisition_derivation_and_measurements(self, tmp_path):
+        store = make_ome_zarr_v3(tmp_path / 'output' / 'fused.ome.zarr')
+        source_paths = [tmp_path / 'tile1.tiff', tmp_path / 'tile2.tiff']
+        for path in source_paths:
+            path.write_bytes(b'II*\x00')
+
+        create_zarr_ro_crate(store, source_paths=source_paths, acquisition_metadata=[OME_METADATA, TIFF_METADATA],
+                             derivation={'name': 'Fusion to OME-Zarr', 'software': SOFTWARE,
+                                         'end_time': '2026-11-05T16:00:00'},
+                             measurements={'ncc': 0.75, 'nmi': {'value': 0.5, 'description': 'Registration nmi'}},
+                             gen_preview=False)
+
+        entities = read_entities(store)
+        sources = [{'@id': path.resolve().as_uri()} for path in source_paths]
+        root = entities['./']
+        assert root['isBasedOn'] == sources
+        # referenced, not part of the store
+        assert not any(source in as_list(root.get('hasPart', [])) for source in sources)
+        assert entities[sources[0]['@id']]['@type'] == 'File'
+        assert root['mentions'] == [{'@id': '#acquisition'}, {'@id': '#derivation'}]
+        assert root['datePublished'] == '2026-11-05T16:00:00'
+
+        acquisition = entities['#acquisition']
+        assert acquisition['instrument'] == {'@id': '#instrument-zeiss-crossbeam-1234'}
+        assert acquisition['result'] == sources
+        # the TIFF DateTime is read as such
+        assert (acquisition['startTime'], acquisition['endTime']) == ('2026-01-02T03:04:05', '2026-01-02T04:00:00')
+        assert entities['#instrument-zeiss-crossbeam-1234'] == {
+            '@id': '#instrument-zeiss-crossbeam-1234', '@type': 'IndividualProduct',
+            'manufacturer': 'Zeiss', 'name': 'Crossbeam', 'serialNumber': '1234'}
+
+        derivation = entities['#derivation']
+        assert derivation['name'] == 'Fusion to OME-Zarr'
+        assert derivation['instrument'] == {'@id': SOFTWARE['url']}
+        assert derivation['object'] == sources
+        assert derivation['result'] == {'@id': './'}
+
+        assert root['variableMeasured'] == [{'@id': '#measurement-ncc'}, {'@id': '#measurement-nmi'}]
+        assert entities['#measurement-ncc'] == {'@id': '#measurement-ncc', '@type': 'PropertyValue',
+                                                'name': 'ncc', 'value': 0.75}
+        assert entities['#measurement-nmi']['description'] == 'Registration nmi'
+
+    def test_acquisition_without_instrument_or_sources(self, tmp_path):
+        store = make_ome_zarr_v3(tmp_path / 'fused.ome.zarr')
+
+        create_zarr_ro_crate(store, acquisition_metadata=[{}], gen_preview=False)
+
+        entities = read_entities(store)
+        assert 'instrument' not in entities['#acquisition']
+        assert entities['#acquisition']['result'] == {'@id': './'}
+        assert not any(entity['@type'] == 'IndividualProduct' for entity in entities.values())
+        assert 'isBasedOn' not in entities['./'] and 'variableMeasured' not in entities['./']
+
+    def test_preview_shows_the_provenance(self, tmp_path):
+        store = make_ome_zarr_v3(tmp_path / 'fused.ome.zarr')
+
+        create_zarr_ro_crate(store, acquisition_metadata=[OME_METADATA],
+                             derivation={'name': 'Fusion to OME-Zarr', 'software': SOFTWARE})
+
+        page = (store / 'ro-crate-preview.html').read_text(encoding='utf-8')
+        assert '<a href="#derivation">Fusion to OME-Zarr</a>' in page
+        assert '<a href="#instrument-zeiss-crossbeam-1234">Crossbeam</a>' in page
+
+
+def test_find_metadata_value_prefers_context():
+    metadata = {'Detector': {'Model': 'camera'}, 'Microscope': {'Model': 'scope'}}
+    assert find_metadata_value(metadata, ['model'], ['microscope', '']) == 'scope'
+    assert find_metadata_value(metadata, ['model'], ['instrument']) is None
+    assert find_metadata_value(TIFF_METADATA, ['manufacturer', 'make'], ['microscope', '']) == 'FEI'
+    # keys differing only in case, spaces or separators
+    assert find_metadata_value({'Microscope Info': {'Serial_Number': 7}}, ['serialnumber'], ['microscope']) == 7
