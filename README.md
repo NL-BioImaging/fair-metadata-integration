@@ -59,6 +59,80 @@ create_ro_crate(
   root when they are outside `dest_path` (default `False`: referenced, see below).
 - `gen_preview` — write an `ro-crate-preview.html` alongside the metadata
   (default `True`).
+- `name`, `description` — the name and description of the crate's root dataset.
+- `metadata_conforms_to` — the schema the metadata files follow, as a `dict` of
+  its `url` and optionally its `name` and `version`; each metadata file gets a
+  `conformsTo` link to it.
+- `ome_version` — when `dest_path` is itself an OME-Zarr store, the OME-NGFF
+  version it conforms to (default: the version the store states; see below).
+
+`workflow_schema_filename` is optional: without it, the crate describes just the
+data — the root dataset with the inputs, outputs and metadata files as its
+parts — and has no workflow or run. `parameters` then cannot be given.
+
+OME-Zarr stores, as inputs, outputs or as the crate itself, conform to the
+OME-NGFF version they state (`conformsTo` e.g.
+`https://ngff.openmicroscopy.org/0.5/`), read from `zarr.json` (0.5) or
+`.zattrs` (0.4 and earlier).
+
+### An RO-Crate in an OME-Zarr store
+
+`create_zarr_ro_crate` describes an OME-Zarr store, written by something else,
+with an RO-Crate in the store itself. Only `ro-crate-metadata.json` (and the
+preview) is written; the store is left as it is:
+
+```python
+from fair_metadata_integration import create_zarr_ro_crate
+
+create_zarr_ro_crate(
+    "cells.ome.zarr",
+    metadata_paths=["cells.ome.zarr/acquisition-metadata.yaml"],
+    metadata_conforms_to={"url": "https://example.org/model.yaml", "name": "Imaging model", "version": "2.0"},
+)
+```
+
+The root dataset is the store: named after it (`cells`), with the EDAM Zarr
+format, the OME-NGFF version it conforms to — `ome_version`, or else the one the
+store states (a warning if they differ, or if neither is known) — and a
+`description`, by default "OME-Zarr image", or "OME-Zarr image with labels".
+The metadata files must be in the store; they are `about` the store.
+
+### Helpers for writing a run's files
+
+To package a run of a tool with no hand-written Bilayers config, generate one
+from the values the run used, and write those values as its parameters file:
+
+```python
+from fair_metadata_integration import (WORKFLOW_CONFIG_NAME, bilayers_config, bilayers_format,
+                                       create_ro_crate, image_entry, write_bilayers_config,
+                                       write_parameters)
+
+values = {"model": "MitoNet_v1", "confidence": 0.5}
+config = bilayers_config(
+    "empanada_3d", values,
+    inputs=[image_entry("input_image", formats=[bilayers_format("data/input.tif")])],
+    outputs=[image_entry("segmentation", formats=["omezarr"], section="outputs")],
+    citations=[{"name": "empanada-napari", "doi": "10.1083/jcb.202208005"}],
+    docker_image={"org": "ghcr.io/me", "name": "tool", "tag": "1.0", "platform": "linux/amd64"},
+    cli_command="python run.py",
+    choices={"model": ["MitoNet_v1", "MitoNet_v1_mini"]},
+)
+config_path = write_bilayers_config(f"crate/{WORKFLOW_CONFIG_NAME}", config)
+parameters_path = write_parameters("crate", values)  # crate/parameters.yaml
+create_ro_crate("crate", config_path, ["data/input.tif"], ["crate/output.ome.zarr"],
+                parameters=parameters_path)
+```
+
+- `bilayers_config` makes every value a parameter whose default is that value,
+  typed from it (`checkbox`, `integer`, `float`, `textbox`, or `dropdown` when it
+  has `choices`); values that are `None` are left out. `parameter_entry` and
+  `image_entry` build single entries.
+- `write_bilayers_config` validates the config by converting it with
+  biomero-schema's Bilayers adapter when biomero-schema is installed, and writes
+  it.
+- `write_parameters` writes possibly nested values to `parameters.yaml`
+  (`PARAMETERS_FILE_NAME`), with values YAML cannot hold (e.g. paths) as text;
+  `plain_value` and `write_yaml` do this for any data.
 
 ### Command line
 
