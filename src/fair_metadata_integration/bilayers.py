@@ -20,13 +20,15 @@ BILAYERS_FORMATS = {'tif': 'tiff', 'jpg': 'jpeg', 'zarr': 'omezarr'}
 
 
 def bilayers_config(name, parameters, inputs=(), outputs=(), citations=(), docker_image=None,
-                    cli_command='', choices=None):
+                    cli_command='', choices=None, section=None, display_only=()):
     """Return the Bilayers config of the workflow *name*.
 
     *parameters* maps the workflow's parameter names to the values the run used; values
     that are None are left out. *choices* maps the names of the parameters that are
-    drop-downs to the values they offer. *inputs* and *outputs* are entries as
-    :func:`image_entry` returns them; *docker_image* is a mapping of org, name, tag and
+    drop-downs to the values they offer; *section* is the section_id of the parameters,
+    under which a run's parameters file then holds their values. *inputs* and *outputs*
+    are entries as :func:`image_entry` returns them, *display_only* entries as
+    :func:`display_entry` returns them; *docker_image* is a mapping of org, name, tag and
     platform.
     """
     choices = choices or {}
@@ -41,9 +43,9 @@ def bilayers_config(name, parameters, inputs=(), outputs=(), citations=(), docke
         },
         'inputs': list(inputs),
         'outputs': list(outputs),
-        'parameters': [parameter_entry(key, value, choices.get(key))
+        'parameters': [parameter_entry(key, value, choices.get(key), section)
                        for key, value in parameters.items() if value is not None],
-        'display_only': [],
+        'display_only': list(display_only),
     }
 
 
@@ -73,8 +75,11 @@ def image_entry(name, label=None, description='', subtype=(), formats=(), unique
     }
 
 
-def parameter_entry(name, value, choices=None):
-    """Return the parameter entry for one value: its type follows from the value, or from *choices*."""
+def parameter_entry(name, value, choices=None, section=None):
+    """Return the parameter entry for one value: its type follows from the value, or from *choices*.
+
+    With a *section*, the entry has that section_id, and a run's value is under it.
+    """
     value = plain_value(value)
     entry = {
         'name': name,
@@ -101,6 +106,15 @@ def parameter_entry(name, value, choices=None):
         'optional': False,
         'mode': 'beginner',
     })
+    if section:
+        entry['section_id'] = str(section)
+    return entry
+
+
+def display_entry(name, value, section=None):
+    """Return a display-only entry for one value: shown, but not passed to the command."""
+    entry = parameter_entry(name, value, section=section)
+    del entry['cli_tag']
     return entry
 
 

@@ -157,7 +157,11 @@ create_ro_crate("crate", config_path, ["data/input.tif"], ["crate/output.ome.zar
 
 - `bilayers_config` makes every value a parameter whose default is that value,
   typed from it (`checkbox`, `integer`, `float`, `textbox`, or `dropdown` when it
-  has `choices`); values that are `None` are left out. `parameter_entry` and
+  has `choices`); values that are `None` are left out. With `section`, the
+  parameters get that `section_id`, so the run's values go under that key in
+  `parameters.yaml`. `display_only` takes entries for values that are shown but
+  not passed to the command, e.g. those of other tools of the run, made with
+  `display_entry(name, value, section=...)`. `parameter_entry` and
   `image_entry` build single entries.
 - `write_bilayers_config` validates the config by converting it with
   biomero-schema's Bilayers adapter when biomero-schema is installed, and writes

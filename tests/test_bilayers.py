@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from fair_metadata_integration import (bilayers_config, bilayers_format, create_ro_crate, image_entry,
-                                       parameter_entry, write_bilayers_config)
+from fair_metadata_integration import (bilayers_config, bilayers_format, create_ro_crate, display_entry,
+                                       image_entry, parameter_entry, write_bilayers_config)
+from fair_metadata_integration.bilayers import unknown_value_names
 
 
 def make_config():
@@ -57,6 +58,18 @@ class TestBilayersConfig:
     def test_parameter_entry(self):
         entry = parameter_entry('tile_size', 512)
         assert (entry['type'], entry['default'], entry['cli_tag']) == ('integer', 512, '--tile_size')
+        assert 'section_id' not in entry
+
+    def test_sections_hold_the_run_values(self):
+        config = bilayers_config('segment', {'threshold': 0.5}, section='inference',
+                                 display_only=[display_entry('save_dir', 'out', section='measure')])
+        assert by_name(config)['threshold']['section_id'] == 'inference'
+        display = config['display_only'][0]
+        assert (display['name'], display['section_id'], display['default']) == ('save_dir', 'measure', 'out')
+        assert 'cli_tag' not in display
+        values = {'inference': {'threshold': 0.7}, 'measure': {'save_dir': 'out'}}
+        assert unknown_value_names(config, values) == []
+        assert unknown_value_names(config, {'threshold': 0.7}) == ['threshold']
 
     def test_biomero_schema_accepts_config(self):
         adapters = pytest.importorskip('biomero_schema.adapters')
