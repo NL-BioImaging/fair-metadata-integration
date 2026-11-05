@@ -7,6 +7,7 @@ records how the output was produced as well as what can be set.
 When biomero-schema is installed, a config is checked by converting it with its Bilayers
 adapter before it is written.
 """
+from collections.abc import Mapping
 import logging
 import os
 
@@ -14,7 +15,6 @@ from .files import plain_value, write_yaml
 
 logger = logging.getLogger(__name__)
 
-PARAMETER_SECTION = 'input-args'
 # Bilayers format names that differ from the file name extension
 BILAYERS_FORMATS = {'tif': 'tiff', 'jpg': 'jpeg', 'zarr': 'omezarr'}
 
@@ -99,10 +99,43 @@ def parameter_entry(name, value, choices=None):
         'default': value,
         'cli_tag': f'--{name}',
         'optional': False,
-        'section_id': PARAMETER_SECTION,
         'mode': 'beginner',
     })
     return entry
+
+
+def template_entries(config):
+    """The inputs, outputs and parameters entries of the Bilayers *config*, each with a name."""
+    return [entry for key in ('inputs', 'outputs', 'parameters') for entry in (config or {}).get(key) or []
+            if isinstance(entry, dict) and entry.get('name')]
+
+
+def value_path(entry):
+    """Where a run's value for the template *entry* is in its parameter values: under its section_id, if it has one."""
+    return tuple(str(key) for key in (entry.get('section_id'), entry['name']) if key)
+
+
+def find_value(values, path):
+    """(True, the value at *path* in the nested *values*), or (False, None) if it is not there."""
+    for key in path:
+        if not isinstance(values, Mapping) or key not in values:
+            return False, None
+        values = values[key]
+    return True, values
+
+
+def unknown_value_names(config, values, prefix=()):
+    """The dotted names of the values in the nested *values* that are at no entry of the Bilayers *config*."""
+    paths = {value_path(entry) for entry in template_entries(config)}
+    unknown = []
+    for key, value in values.items():
+        path = prefix + (str(key),)
+        is_section = any(len(known) > len(path) and known[:len(path)] == path for known in paths)
+        if path not in paths and is_section and isinstance(value, Mapping):
+            unknown.extend(unknown_value_names(config, value, path))
+        elif path not in paths:
+            unknown.append('.'.join(path))
+    return unknown
 
 
 def bilayers_format(path):

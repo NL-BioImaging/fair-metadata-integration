@@ -1,15 +1,15 @@
-import json
 import os.path
 import re
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
-from urllib.parse import quote
 
 import yaml
 from rocrate.rocrate import ROCrate
 from rocrate.model import ComputerLanguage, ContextEntity
 
+from .bilayers import unknown_value_names
+from .files import write_parameters
 from .preview import CratePreview, zarr_attributes
 
 # Workflow Run Crate: the crate also describes a run of the workflow, with its parameter values
@@ -129,25 +129,17 @@ def build_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), out
 
 
 def add_workflow_run(crate, workflow_schema_filename, input_entities, output_entities, parameters, dest_path):
-    """Add the bilayers workflow and a run of it, which consumed *input_entities* and produced *output_entities*."""
+    """Add the bilayers workflow and a run of it, which consumed *input_entities* and produced *output_entities*.
+
+    The run's parameter values are not entities of the crate: the file holding them is, about the run.
+    """
     # main=True sets the root dataset's mainEntity and adds the Workflow RO-Crate
     # profile to the root dataset's conformsTo.
     workflow = crate.add_workflow(source=workflow_schema_filename,
                                   dest_path=os.path.basename(workflow_schema_filename),
                                   main=True, lang=get_bilayers_language(crate))
 
-    # The Workflow RO-Crate profile ranges input/output over FormalParameter rather
-    # than over the data entities themselves; each data entity is linked back to its
-    # parameter with exampleOfWork.
-    if input_entities:
-        workflow['input'] = add_formal_parameters(crate, input_entities, 'input')
-    if output_entities:
-        workflow['output'] = add_formal_parameters(crate, output_entities, 'output')
-    schema_parameters = add_schema_parameters(crate, read_yaml(workflow_schema_filename))
-    workflow.append_to('input', list(schema_parameters.values()))
-
-    # The run itself: the workflow as instrument, the input data and parameter values as
-    # object, the output data as result.
+    # The run itself: the workflow as instrument, the input data as object, the output data as result.
     run = crate.add(ContextEntity(crate, '#run', {'@type': 'CreateAction', 'name': f'Run of {workflow.id}'}))
     run['instrument'] = workflow
     if input_entities:
@@ -155,12 +147,12 @@ def add_workflow_run(crate, workflow_schema_filename, input_entities, output_ent
     if output_entities:
         run['result'] = output_entities
     if parameters is not None:
-        values = parameters
-        if not isinstance(parameters, Mapping):
-            values = read_yaml(parameters)
-            parameters_file = add_data_entity(crate, parameters, dest_path, copy=True)
-            parameters_file['about'] = run
-        run.append_to('object', add_parameter_values(crate, values, schema_parameters))
+        if isinstance(parameters, Mapping):
+            parameters = write_parameters(dest_path, parameters)
+        unknown = unknown_value_names(read_yaml(workflow_schema_filename), read_yaml(parameters) or {})
+        if unknown:
+            warnings.warn(f'Parameter values not in the workflow {workflow.id}: {", ".join(unknown)}')
+        add_data_entity(crate, parameters, dest_path, copy=True)['about'] = run
     for profile, name in ((PROCESS_RUN_CRATE, 'Process Run Crate'), (WORKFLOW_RUN_CRATE, 'Workflow Run Crate')):
         crate.root_dataset.append_to('conformsTo', crate.add(ContextEntity(crate, profile, {
             '@type': 'CreativeWork', 'name': name, 'version': '0.5'})))
@@ -263,71 +255,6 @@ def read_yaml(path):
         return yaml.safe_load(f)
 
 
-# Bilayers parameter types with a schema.org data type other than Text
-BILAYERS_DATA_TYPES = {'integer': 'Integer', 'float': 'Float', 'checkbox': 'Boolean'}
-
-
-def add_schema_parameters(crate, schema):
-    """Add a FormalParameter for each parameter the bilayers *schema* defines; map their names to them."""
-    parameters = {}
-    for parameter in (schema or {}).get('parameters') or []:
-        if not isinstance(parameter, dict) or not parameter.get('name'):
-            continue
-        name = str(parameter['name'])
-        properties = {
-            '@type': 'FormalParameter',
-            'name': name,
-            'additionalType': BILAYERS_DATA_TYPES.get(parameter.get('type'), 'Text'),
-            'valueRequired': not parameter.get('optional', False),
-        }
-        if parameter.get('description') or parameter.get('label'):
-            properties['description'] = str(parameter.get('description') or parameter.get('label'))
-        if parameter.get('default') is not None:
-            properties['defaultValue'] = property_value(parameter['default'])
-        parameters[name] = crate.add(ContextEntity(crate, f'#parameter-{quote(name)}', properties))
-    return parameters
-
-
-def add_parameter_values(crate, values, schema_parameters):
-    """Add a PropertyValue for each parameter value in *values*, linked to the parameter it is the value of.
-
-    *values* can be nested: a key that is not one of the workflow's parameters groups the
-    parameters under it (e.g. by section). A value whose name is no parameter is still
-    recorded, by its dotted path, but with a warning.
-    """
-    entities = []
-    for name, value in flatten_parameter_values(values, schema_parameters):
-        properties = {'@type': 'PropertyValue', 'name': name, 'value': property_value(value)}
-        entity = crate.add(ContextEntity(crate, f'#value-{quote(name)}', properties))
-        if name in schema_parameters:
-            entity['exampleOfWork'] = schema_parameters[name]
-        else:
-            warnings.warn(f"'{name}' is not a parameter of the workflow")
-        entities.append(entity)
-    return entities
-
-
-def flatten_parameter_values(values, schema_parameters, prefix=''):
-    """The (name, value) of each parameter in the nested mapping *values*."""
-    if not isinstance(values, Mapping):
-        raise ValueError(f'Parameter values must be a mapping of names to values, not {type(values).__name__}')
-    for key, value in values.items():
-        name = prefix + str(key)
-        if str(key) in schema_parameters:
-            yield str(key), value
-        elif isinstance(value, Mapping):
-            yield from flatten_parameter_values(value, schema_parameters, name + '.')
-        else:
-            yield name, value
-
-
-def property_value(value):
-    """A parameter value as a JSON-LD value: scalars as they are, anything else as JSON text."""
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return value
-    return json.dumps(value, default=str)
-
-
 def relative_path_inside(path, folder):
     """The path of *path* relative to *folder*, or None if it is not inside it."""
     path, folder = Path(path).resolve(), Path(folder).resolve()
@@ -393,23 +320,3 @@ def get_bilayers_language(crate):
             'url': {'@id': 'https://github.com/bilayer-containers/bilayers'},
         },
     ))
-
-
-def add_formal_parameters(crate, data_entities, name):
-    """Add a FormalParameter for each of *data_entities*: *name*, then *name*_2, *name*_3, ..."""
-    return [add_formal_parameter(crate, entity, name if i == 0 else f'{name}_{i + 1}')
-            for i, entity in enumerate(data_entities)]
-
-
-def add_formal_parameter(crate, data_entity, name):
-    """Add a FormalParameter describing *data_entity* and link the two together."""
-    properties = {'@type': 'FormalParameter', 'name': name}
-    # Bioschemas FormalParameter takes the format as a URL: the data entity's EDAM format, not its media type
-    encoding_format = data_entity.as_jsonld().get('encodingFormat')
-    format_ref = next((f for f in (encoding_format if isinstance(encoding_format, list) else [encoding_format])
-                       if isinstance(f, dict)), None)
-    if format_ref:
-        properties['encodingFormat'] = format_ref
-    parameter = crate.add(ContextEntity(crate, f'#{name}', properties))
-    data_entity['exampleOfWork'] = parameter
-    return parameter

@@ -11,6 +11,8 @@ import yaml
 from rocrate import vocabs
 from rocrate.model import Preview
 
+from .bilayers import find_value, value_path
+
 # Supporting files of the preview, as the RO-Crate specification names them
 VIEWS_DIR = 'ro-crate-preview_files'
 # Limits of the browsable views of text files
@@ -68,7 +70,7 @@ class CratePreview(Preview):
         def section(entity, source=None):
             view = views.get(entity.id, (None,))[0]
             jsonld = entity.as_jsonld()
-            return render_entity(jsonld, entities, anchors, terms, source, view, parameter_values(jsonld, entities))
+            return render_entity(jsonld, entities, anchors, terms, source, view, parameter_values(crate, entity.id))
 
         title = html.escape(str(root.get('name') or 'RO-Crate'))
         description = root.get('description')
@@ -161,16 +163,16 @@ def as_list(value):
     return value if isinstance(value, list) else [] if value is None else [value]
 
 
-def parameter_values(entity, entities):
-    """Map the name of each input parameter of *entity* (a workflow) to the value a run gave it, if any."""
-    inputs = {ref['@id'] for ref in as_list(entity.get('input')) if isinstance(ref, dict)}
-    values = {}
-    for value in entities.values():
-        parameter = next((ref['@id'] for ref in as_list(value.get('exampleOfWork'))
-                          if isinstance(ref, dict) and ref.get('@id') in inputs), None)
-        if parameter and 'PropertyValue' in as_list(value.get('@type')):
-            values[entities[parameter].get('name')] = value.get('value')
-    return values
+def parameter_values(crate, workflow_id):
+    """The parameter values of a run of the workflow *workflow_id*, from the file about that run; None if none."""
+    runs = {entity.id for entity in crate.contextual_entities
+            if workflow_id in {ref.id for ref in as_list(entity.get('instrument')) if hasattr(ref, 'id')}}
+    for entity in crate.data_entities:
+        about = {ref.id for ref in as_list(entity.get('about')) if hasattr(ref, 'id')}
+        source = local_source(entity)
+        if about & runs and source is not None:
+            return read_structured(source)
+    return None
 
 
 def render_entity(entity, entities, anchors, extra_terms, source=None, view=None, values=None):
@@ -200,7 +202,7 @@ def render_entity(entity, entities, anchors, extra_terms, source=None, view=None
 def render_details(source, values=None):
     """Content summary for a CSV/TSV file, a bilayers configuration or an OME-Zarr folder; empty if there is none.
 
-    *values* are the parameter values of a run of the bilayers configuration, by parameter name.
+    *values* are the nested parameter values of a run of the bilayers configuration.
     """
     try:
         path = Path(source)
@@ -285,14 +287,15 @@ def render_bilayers_items(items, with_default=False, values=None):
     def cell(value):
         return f'<td>{html.escape("" if value is None else str(value))}</td>'
 
-    def value_cell(name):
+    def value_cell(item):
         # A parameter the run gave no value has its default
-        return cell(values[name]) if name in values else '<td class="type">default</td>'
+        found, value = find_value(values, value_path(item))
+        return cell(value) if found else '<td class="type">default</td>'
 
     rows = ''.join(
         '<tr>' + cell(item.get('name')) + cell(item.get('type')) + cell(item.get('cli_tag'))
         + (cell(item.get('default')) if with_default else '')
-        + (value_cell(str(item.get('name'))) if values else '')
+        + (value_cell(item) if values else '')
         + cell(item.get('description') or item.get('label')) + '</tr>'
         for item in items
     )
