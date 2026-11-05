@@ -59,6 +59,8 @@ parameters:
   - {name: normalisation, type: dropdown, default: percentile, section_id: pre_processing}
   - {name: normalisation, type: checkbox, default: false, section_id: registration}
   - {name: method, type: textbox, default: orb, section_id: registration}
+display_only:
+  - {name: coordinate_system, type: dropdown, section_id: input_output}
 """
 
 
@@ -460,7 +462,7 @@ class TestCreateRoCrate:
         input_zarr, output_zarr = ome_zarr_dirs
         dest = tmp_path / "crate"
         values = tmp_path / "parameters.yaml"
-        values.write_text("pre_processing:\n  normalisation: none\nregistration:\n  normalisation: true\n"
+        values.write_text("input_output:\n  coordinate_system: source\npre_processing:\n  normalisation: none\nregistration:\n  normalisation: true\n"
                           "  method: sift\n  tiling:\n    tile_size: [512, 512]\ngeneral:\n  verbose: false\n")
 
         with pytest.warns(UserWarning, match="registration.tiling, general$"):
