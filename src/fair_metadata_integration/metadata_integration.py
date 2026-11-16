@@ -11,7 +11,7 @@ from rocrate.rocrate import ROCrate
 from rocrate.model import ComputerLanguage, ContextEntity
 
 from .bilayers import unknown_value_names
-from .files import write_parameters
+from .files import write_parameters, write_path_list
 from .preview import CratePreview, zarr_attributes
 from .provenance import add_acquisition, add_action_times, add_derivation, add_measurements, add_software
 
@@ -50,8 +50,9 @@ def create_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), ou
 
     *input_paths* and *output_paths* are the data the run consumed and produced; a single
     input can also be given as just its path. Instead of a path, an item can be a group of
-    many files, as a mapping of its 'name', 'paths' and optionally 'description': a Dataset
-    with those files as its parts (see :func:`add_data_group`). *metadata_paths* are further
+    many files, as a mapping of its 'name', 'paths' and optionally 'description' and
+    'list_file': a Dataset with those files as its parts, or listed in that CSV file
+    (see :func:`add_data_group`). *metadata_paths* are further
     files describing the data, which are copied into the crate.
 
     *parameters* are the values of the workflow's parameters in this run: a mapping, or
@@ -82,8 +83,8 @@ def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=Non
                          derivation=None, measurements=None):
     """Write an RO-Crate into the existing OME-Zarr store *store_path*, describing it; return the crate.
 
-    Only ro-crate-metadata.json (and, with *gen_preview*, the preview) is written: the store
-    itself is left as it is. The root dataset is the store, named after it, with its Zarr
+    Only ro-crate-metadata.json (with *gen_preview* the preview, and the 'list_file' of a group
+    of sources) is written: the store itself is left as it is. The root dataset is the store, named after it, with its Zarr
     format and the OME-NGFF version it conforms to: *ome_version*, or else the one the store
     states. *description* defaults to what the store holds.
 
@@ -293,14 +294,19 @@ def add_data_entity(crate, path, crate_path, copy=False):
 def add_data_group(crate, item, add_entity, crate_path=None, copy=False):
     """The entity *add_entity(path)* adds for a path; for a group of paths, a Dataset with their entities as its parts.
 
-    A group is a mapping of its 'name', 'paths' and optionally 'description'. The Dataset is
-    the files' common folder (see :func:`group_folder_id`), or else a local '#dataset-' id.
+    A group is a mapping of its 'name', 'paths' and optionally 'description' and 'list_file'.
+    The Dataset is the files' common folder (see :func:`group_folder_id`), or else a local
+    '#dataset-' id. With a 'list_file' name, the files are not entities: their paths, relative
+    to that folder, are written to that CSV file in *crate_path*, which is about the Dataset.
     """
     if not isinstance(item, Mapping):
         return add_entity(item)
     if not item.get('name') or not item.get('paths'):
         raise ValueError("A group of data needs a 'name' and 'paths'")
-    members = [add_entity(path) for path in item['paths']]
+    list_file = item.get('list_file')
+    if list_file and copy:
+        raise ValueError('A group listed in a file is referenced, not copied')
+    members = [] if list_file else [add_entity(path) for path in item['paths']]
     identifier = group_folder_id(item['paths'], crate_path, copy)
     # two groups in one folder must not merge into one entity
     if identifier is None or crate.get(identifier) is not None:
@@ -308,7 +314,11 @@ def add_data_group(crate, item, add_entity, crate_path=None, copy=False):
     group = crate.add(ContextEntity(crate, identifier, {'@type': 'Dataset', 'name': str(item['name'])}))
     if item.get('description'):
         group['description'] = str(item['description'])
-    group['hasPart'] = members
+    if members:
+        group['hasPart'] = members
+    if list_file:
+        list_path = write_path_list(os.path.join(crate_path, list_file), item['paths'], common_folder(item['paths']))
+        add_data_entity(crate, list_path, crate_path)['about'] = group
     root_parts = crate.root_dataset.get('hasPart', [])
     # a '#' id is contextual, so its files must stay the root's parts to be data entities
     if not identifier.startswith('#') and all(member in root_parts for member in members):
@@ -323,9 +333,8 @@ def group_folder_id(paths, crate_path=None, copy=False):
     None when that folder would be the crate itself: the paths are in its root, are copied
     there (*copy*), lie both in and outside it, or are on different drives.
     """
-    try:
-        folder = Path(os.path.commonpath([Path(path).resolve().parent for path in paths]))
-    except ValueError:
+    folder = common_folder(paths)
+    if folder is None:
         return None
     if crate_path is None:
         return folder.as_uri().rstrip('/') + '/'
@@ -336,6 +345,14 @@ def group_folder_id(paths, crate_path=None, copy=False):
     if copy or any_inside or folder == Path(crate_path).resolve():
         return None
     return folder.as_uri().rstrip('/') + '/'
+
+
+def common_folder(paths):
+    """The folder holding all *paths*, or None when there is none (they are on different drives)."""
+    try:
+        return Path(os.path.commonpath([Path(path).resolve().parent for path in paths]))
+    except ValueError:
+        return None
 
 
 def add_ngff_conformance(crate, entity, path):

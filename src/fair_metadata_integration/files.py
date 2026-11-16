@@ -1,6 +1,8 @@
-"""Write the files a crate records: the run's parameter values, and YAML in general."""
+"""Write the files a crate records: the run's parameter values, lists of paths, and YAML in general."""
 from collections.abc import Mapping
+import csv
 import os
+from pathlib import Path
 
 import yaml
 
@@ -31,6 +33,18 @@ def write_yaml(path, data):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as file:
         yaml.safe_dump(data, file, sort_keys=False, allow_unicode=True)
+    return path
+
+
+def write_path_list(path, file_paths, folder=None):
+    """Write *file_paths* to the CSV file *path*, a 'path' column, relative to *folder* when given; return *path*."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, 'w', encoding='utf-8', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['path'])
+        for file_path in file_paths:
+            resolved = Path(file_path).resolve()
+            writer.writerow([(resolved.relative_to(folder) if folder is not None else resolved).as_posix()])
     return path
 
 

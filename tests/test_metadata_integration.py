@@ -379,6 +379,30 @@ class TestCreateRoCrate:
         assert all(({"@id": tile_id} in root_parts) != is_folder for tile_id in tile_ids)
         ROCrate(dest)
 
+    def test_group_listed_in_a_file(self, tmp_path, bilayers_config):
+        """With a list_file the files are not entities: their paths are in that CSV, about the group."""
+        tiles = [tmp_path / "tiles" / "a" / "tile1.tif", tmp_path / "tiles" / "b" / "tile2.tif"]
+        for tile in tiles:
+            tile.parent.mkdir(parents=True)
+            tile.write_bytes(b"II*\x00")
+        dest = tmp_path / "crate"
+        group = {"name": "Source tiles", "paths": [str(tile) for tile in tiles], "list_file": "tiles.csv"}
+
+        create_ro_crate(str(dest), str(bilayers_config), group, gen_preview=False)
+
+        entities = self._read_entities(dest)
+        group_id = uri(tmp_path / "tiles")
+        assert (dest / "tiles.csv").read_text().splitlines() == ["path", "a/tile1.tif", "b/tile2.tif"]
+        assert entities["tiles.csv"]["about"] == {"@id": group_id}
+        assert "hasPart" not in entities[group_id]
+        assert not any(entity_id.endswith(".tif") for entity_id in entities)
+        assert entities["#run"]["object"] == [{"@id": group_id}]
+        assert {"@id": group_id} in entities["./"]["hasPart"]
+        ROCrate(dest)
+
+        with pytest.raises(ValueError):
+            create_ro_crate(str(dest), str(bilayers_config), group, copy_inputs=True)
+
     def test_group_needs_name_and_paths(self, tmp_path, bilayers_config):
         with pytest.raises(ValueError):
             create_ro_crate(str(tmp_path / "crate"), str(bilayers_config), [{"name": "Empty", "paths": []}])

@@ -193,21 +193,28 @@ class TestStoreProvenance:
                                                 'name': 'ncc', 'value': 0.75}
         assert entities['#measurement-nmi']['description'] == 'Registration nmi'
 
-    def test_group_of_sources_is_a_dataset(self, tmp_path):
+    @pytest.mark.parametrize('list_file', [None, 'sources.csv'])
+    def test_group_of_sources_is_a_dataset(self, tmp_path, list_file):
         store = make_ome_zarr_v3(tmp_path / 'output' / 'fused.ome.zarr')
         source_paths = [tmp_path / 'tiles' / 'tile1.tiff', tmp_path / 'tiles' / 'tile2.tiff']
         source_paths[0].parent.mkdir()
         for path in source_paths:
             path.write_bytes(b'II*\x00')
 
-        create_zarr_ro_crate(store, source_paths=[{'name': 'Source tiles', 'paths': source_paths}],
+        create_zarr_ro_crate(store, source_paths=[{'name': 'Source tiles', 'paths': source_paths,
+                                                   'list_file': list_file}],
                              derivation={'name': 'Fusion to OME-Zarr'}, gen_preview=False)
 
         entities = read_entities(store)
         group_id = (tmp_path / 'tiles').resolve().as_uri() + '/'
         assert entities['./']['isBasedOn'] == [{'@id': group_id}]
         assert entities['#derivation']['object'] == [{'@id': group_id}]
-        assert entities[group_id]['hasPart'] == [{'@id': path.resolve().as_uri()} for path in source_paths]
+        if list_file:
+            assert (store / list_file).read_text().splitlines() == ['path', 'tile1.tiff', 'tile2.tiff']
+            assert entities[list_file]['about'] == {'@id': group_id}
+            assert 'hasPart' not in entities[group_id]
+        else:
+            assert entities[group_id]['hasPart'] == [{'@id': path.resolve().as_uri()} for path in source_paths]
         assert entities[group_id]['@type'] == 'Dataset'
         assert {'@id': group_id} in as_list(entities['./']['hasPart'])
         ROCrate(store)

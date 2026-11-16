@@ -86,8 +86,9 @@ OME-NGFF version they state (`conformsTo` e.g.
 ### An RO-Crate in an OME-Zarr store
 
 `create_zarr_ro_crate` describes an OME-Zarr store, written by something else,
-with an RO-Crate in the store itself. Only `ro-crate-metadata.json` (and the
-preview) is written; the store is left as it is:
+with an RO-Crate in the store itself. Only `ro-crate-metadata.json` (the
+preview, and the `list_file` of a group of sources) is written; the store is left
+as it is:
 
 ```python
 from fair_metadata_integration import create_zarr_ro_crate
@@ -309,7 +310,28 @@ The group is a `Dataset` with the files as its `hasPart`; it is what the run's
 its own entity. The `Dataset` is the files' common folder (its path in the
 crate, or its `file://` URI), listing only the files given, not everything in
 it. When that folder would be the crate itself (files in or copied to its root),
-the `Dataset` has a local id, `#dataset-` and its name:
+the `Dataset` has a local id, `#dataset-` and its name.
+
+For hundreds of files, give the group a `list_file` name: the files are then not
+entities of the crate. Their paths, relative to the group's folder, are written
+to that CSV file in the crate (one `path` column), which is `about` the group, and
+the group has no `hasPart`. A listed group is referenced, so it cannot be copied
+(`copy_inputs` / `copy_outputs`).
+
+```json
+{
+  "@id": "file:///data/tiles/",
+  "@type": "Dataset",
+  "name": "Source tiles"
+},
+{
+  "@id": "tiles.csv",
+  "@type": "File",
+  "about": { "@id": "file:///data/tiles/" }
+}
+```
+
+Without `list_file`:
 
 ```json
 {
