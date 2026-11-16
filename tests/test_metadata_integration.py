@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import pytest
+from rocrate.rocrate import ROCrate
 
 from fair_metadata_integration.metadata_integration import create_ro_crate, get_file_format
 from fair_metadata_integration.preview import ome_zarr_details, table_details
@@ -371,7 +372,12 @@ class TestCreateRoCrate:
         assert entities[group_id] == {"@id": group_id, "@type": "Dataset", "name": "Source tiles",
                                       "description": "2 tiles", "hasPart": [{"@id": tile_id} for tile_id in tile_ids]}
         assert all(entities[tile_id]["@type"] == "File" for tile_id in tile_ids)
-        assert ({"@id": group_id} in entities["./"]["hasPart"]) == (place == "subfolder")
+        # the files are the root's parts through a folder group, else directly
+        root_parts = entities["./"]["hasPart"]
+        is_folder = not group_id.startswith("#")
+        assert ({"@id": group_id} in root_parts) == is_folder
+        assert all(({"@id": tile_id} in root_parts) != is_folder for tile_id in tile_ids)
+        ROCrate(dest)
 
     def test_group_needs_name_and_paths(self, tmp_path, bilayers_config):
         with pytest.raises(ValueError):

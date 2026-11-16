@@ -318,7 +318,10 @@ def add_data_group(crate, item, add_entity, crate_path=None, copy=False):
     if item.get('description'):
         group['description'] = str(item['description'])
     group['hasPart'] = members
-    if not identifier.startswith(('#', 'file:')):
+    root_parts = crate.root_dataset.get('hasPart', [])
+    # a '#' id is contextual, so its files must stay the root's parts to be data entities
+    if not identifier.startswith('#') and all(member in root_parts for member in members):
+        crate.root_dataset['hasPart'] = [part for part in root_parts if part not in members]
         crate.root_dataset.append_to('hasPart', group)
     return group
 
