@@ -37,6 +37,10 @@ create_ro_crate(
 - `input_paths` — the data the workflow consumed (e.g. OME-Zarr directories or
   TIFF files). A single input can also be given as just its path.
 - `output_paths` — the data the workflow produced.
+
+  In `input_paths` and `output_paths`, many files can be given as one group: a
+  `dict` of its `name`, `paths` and optionally `description`, in place of a
+  path. See [Groups of files](#groups-of-files).
 - `metadata_paths` — further files describing the data
   (typically text: JSON, YAML, XML, CSV). They are part of the crate,
   and copied into its root when outside `dest_path`.
@@ -116,7 +120,8 @@ create_zarr_ro_crate(
 ```
 
 - `source_paths` — the images the store was made from: the store `isBasedOn`
-  them, referenced by their `file://` URI and not part of the store.
+  them, referenced by their `file://` URI and not part of the store. Many
+  images can be one group, as for `input_paths`.
 - `acquisition_metadata` — metadata of (some of) the sources, as `dict`s: an
   `Image acquisition` `CreateAction` (`#acquisition`) with the sources as
   `result`, an `IndividualProduct` instrument from the manufacturer, model and
@@ -285,6 +290,33 @@ are in `config.yaml` and the parameters file, which is `about` the run:
   "@id": "parameters.yaml",
   "@type": "File",
   "about": { "@id": "#run" }
+}
+```
+
+#### Groups of files
+
+A run over many files, e.g. the tiles of a mosaic, can give them as one group:
+
+```python
+create_ro_crate("crate", "config.yaml",
+                input_paths={"name": "Source tiles", "description": "Tiles of the mosaic",
+                             "paths": ["data/tiles/tile1.tif", "data/tiles/tile2.tif"]})
+```
+
+The group is a `Dataset` with the files as its `hasPart`; it is what the run's
+`object` (or `result`, or a store's `isBasedOn`) refers to. Each file is still
+its own entity. The `Dataset` is the files' common folder (its path in the
+crate, or its `file://` URI), listing only the files given, not everything in
+it. When that folder would be the crate itself (files in or copied to its root),
+the `Dataset` has a local id, `#dataset-` and its name:
+
+```json
+{
+  "@id": "file:///data/tiles/",
+  "@type": "Dataset",
+  "name": "Source tiles",
+  "description": "Tiles of the mosaic",
+  "hasPart": [{ "@id": "file:///data/tiles/tile1.tif" }, { "@id": "file:///data/tiles/tile2.tif" }]
 }
 ```
 

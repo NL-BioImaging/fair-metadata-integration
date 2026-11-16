@@ -190,6 +190,23 @@ class TestStoreProvenance:
                                                 'name': 'ncc', 'value': 0.75}
         assert entities['#measurement-nmi']['description'] == 'Registration nmi'
 
+    def test_group_of_sources_is_a_dataset(self, tmp_path):
+        store = make_ome_zarr_v3(tmp_path / 'output' / 'fused.ome.zarr')
+        source_paths = [tmp_path / 'tiles' / 'tile1.tiff', tmp_path / 'tiles' / 'tile2.tiff']
+        source_paths[0].parent.mkdir()
+        for path in source_paths:
+            path.write_bytes(b'II*\x00')
+
+        create_zarr_ro_crate(store, source_paths=[{'name': 'Source tiles', 'paths': source_paths}],
+                             derivation={'name': 'Fusion to OME-Zarr'}, gen_preview=False)
+
+        entities = read_entities(store)
+        group_id = (tmp_path / 'tiles').resolve().as_uri() + '/'
+        assert entities['./']['isBasedOn'] == [{'@id': group_id}]
+        assert entities['#derivation']['object'] == [{'@id': group_id}]
+        assert entities[group_id]['hasPart'] == [{'@id': path.resolve().as_uri()} for path in source_paths]
+        assert entities[group_id]['@type'] == 'Dataset'
+
     def test_acquisition_without_instrument_or_sources(self, tmp_path):
         store = make_ome_zarr_v3(tmp_path / 'fused.ome.zarr')
 

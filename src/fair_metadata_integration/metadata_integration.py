@@ -2,7 +2,9 @@ import os.path
 import re
 import warnings
 from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 from rocrate.rocrate import ROCrate
@@ -47,8 +49,10 @@ def create_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), ou
     folders given, e.g. an OME-Zarr store and the metadata files in it.
 
     *input_paths* and *output_paths* are the data the run consumed and produced; a single
-    input can also be given as just its path. *metadata_paths* are further files describing
-    the data, which are copied into the crate.
+    input can also be given as just its path. Instead of a path, an item can be a group of
+    many files, as a mapping of its 'name', 'paths' and optionally 'description': a Dataset
+    with those files as its parts (see :func:`add_data_group`). *metadata_paths* are further
+    files describing the data, which are copied into the crate.
 
     *parameters* are the values of the workflow's parameters in this run: a mapping, or
     the path of a YAML or JSON file of one, which is then also added to the crate. They need
@@ -88,7 +92,7 @@ def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=Non
     optionally its 'name' and 'version'.
 
     Where the store came from: *source_paths* are the images it was made from, which it is
-    based on; *acquisition_metadata* is the metadata of (some of) those images, as mappings,
+    based on, each a path or a group of paths as for :func:`create_ro_crate`; *acquisition_metadata* is the metadata of (some of) those images, as mappings,
     in which the instrument and acquisition times are looked up; *derivation* is how it was
     made from them, as a mapping of its 'name', and optionally its 'software' (a mapping of
     'name', 'url' and 'version'), 'start_time' and 'end_time'; *measurements* map the names
@@ -108,7 +112,7 @@ def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=Non
     for path in metadata_paths:
         crate.get(relative_path_inside(path, store_path))['about'] = crate.root_dataset
     root = crate.root_dataset
-    sources = [add_source_entity(crate, path) for path in source_paths]
+    sources = [add_data_group(crate, item, partial(add_source_entity, crate)) for item in source_paths]
     if sources:
         root['isBasedOn'] = sources
     if acquisition_metadata:
@@ -130,7 +134,7 @@ def build_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), out
     """The crate :func:`create_ro_crate` writes, not written yet."""
     if parameters is not None and workflow_schema_filename is None:
         raise ValueError('Parameter values need a workflow to be the values of')
-    if isinstance(input_paths, (str, os.PathLike)):
+    if isinstance(input_paths, (str, os.PathLike, Mapping)):
         input_paths = [input_paths]
     crate = ROCrate()
     crate.metadata.extra_terms = dict(EXTRA_TERMS)
@@ -140,8 +144,12 @@ def build_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), out
         crate.root_dataset['description'] = description
     describe_ome_zarr_root(crate, dest_path, ome_version)
 
-    output_entities = [add_data_entity(crate, path, dest_path, copy=copy_outputs) for path in output_paths]
-    input_entities = [add_data_entity(crate, path, dest_path, copy=copy_inputs) for path in input_paths]
+    output_entities = [add_data_group(crate, item, partial(add_data_entity, crate, crate_path=dest_path,
+                                                           copy=copy_outputs), dest_path, copy_outputs)
+                       for item in output_paths]
+    input_entities = [add_data_group(crate, item, partial(add_data_entity, crate, crate_path=dest_path,
+                                                          copy=copy_inputs), dest_path, copy_inputs)
+                      for item in input_paths]
     schema = add_schema_entity(crate, metadata_conforms_to) if metadata_conforms_to else None
     for path in metadata_paths:
         entity = add_data_entity(crate, path, dest_path, copy=True)
@@ -289,6 +297,51 @@ def add_source_entity(crate, path):
     entity = crate.add(ContextEntity(crate, uri, properties))
     add_ngff_conformance(crate, entity, path)
     return entity
+
+
+def add_data_group(crate, item, add_entity, crate_path=None, copy=False):
+    """The entity *add_entity(path)* adds for a path; for a group of paths, a Dataset with their entities as its parts.
+
+    A group is a mapping of its 'name', 'paths' and optionally 'description'. The Dataset is
+    the files' common folder (see :func:`group_folder_id`), or else a local '#dataset-' id.
+    """
+    if not isinstance(item, Mapping):
+        return add_entity(item)
+    if not item.get('name') or not item.get('paths'):
+        raise ValueError("A group of data needs a 'name' and 'paths'")
+    members = [add_entity(path) for path in item['paths']]
+    identifier = group_folder_id(item['paths'], crate_path, copy)
+    # two groups in one folder must not merge into one entity
+    if identifier is None or crate.get(identifier) is not None:
+        identifier = f'#dataset-{quote(str(item["name"]))}'
+    group = crate.add(ContextEntity(crate, identifier, {'@type': 'Dataset', 'name': str(item['name'])}))
+    if item.get('description'):
+        group['description'] = str(item['description'])
+    group['hasPart'] = members
+    if not identifier.startswith(('#', 'file:')):
+        crate.root_dataset.append_to('hasPart', group)
+    return group
+
+
+def group_folder_id(paths, crate_path=None, copy=False):
+    """The id of the folder holding all *paths*: relative when it is in *crate_path*, else its file URI.
+
+    None when that folder would be the crate itself: the paths are in its root, are copied
+    there (*copy*), lie both in and outside it, or are on different drives.
+    """
+    try:
+        folder = Path(os.path.commonpath([Path(path).resolve().parent for path in paths]))
+    except ValueError:
+        return None
+    if crate_path is None:
+        return folder.as_uri().rstrip('/') + '/'
+    relative = relative_path_inside(folder, crate_path)
+    if relative is not None:
+        return relative + '/'
+    any_inside = any(relative_path_inside(path, crate_path) is not None for path in paths)
+    if copy or any_inside or folder == Path(crate_path).resolve():
+        return None
+    return folder.as_uri().rstrip('/') + '/'
 
 
 def add_ngff_conformance(crate, entity, path):

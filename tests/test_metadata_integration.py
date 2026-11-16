@@ -346,6 +346,37 @@ class TestCreateRoCrate:
         assert entities["#run"]["result"] == [{"@id": "c.ome.zarr/"}, {"@id": "d.ome.zarr/"}]
         assert "input" not in entities["config.yaml"] and "output" not in entities["config.yaml"]
 
+    @pytest.mark.parametrize("place", ["outside", "copied", "subfolder", "root"])
+    def test_group_of_inputs_is_a_dataset(self, tmp_path, bilayers_config, place):
+        """A group of files is one Dataset, the run's object, with the files' entities as its parts."""
+        dest = tmp_path / "crate"
+        folder = {"outside": tmp_path / "tiles", "copied": tmp_path / "tiles",
+                  "subfolder": dest / "tiles", "root": dest}[place]
+        folder.mkdir(parents=True)
+        tiles = [folder / "tile1.tif", folder / "tile2.tif"]
+        for tile in tiles:
+            tile.write_bytes(b"II*\x00")
+        group = {"name": "Source tiles", "description": "2 tiles", "paths": [str(tile) for tile in tiles]}
+
+        create_ro_crate(str(dest), str(bilayers_config), group, copy_inputs=place == "copied", gen_preview=False)
+
+        entities = self._read_entities(dest)
+        group_id, tile_ids = {
+            "outside": (uri(folder), [uri(tile) for tile in tiles]),
+            "copied": ("#dataset-Source%20tiles", ["tile1.tif", "tile2.tif"]),
+            "subfolder": ("tiles/", ["tiles/tile1.tif", "tiles/tile2.tif"]),
+            "root": ("#dataset-Source%20tiles", ["tile1.tif", "tile2.tif"]),
+        }[place]
+        assert entities["#run"]["object"] == [{"@id": group_id}]
+        assert entities[group_id] == {"@id": group_id, "@type": "Dataset", "name": "Source tiles",
+                                      "description": "2 tiles", "hasPart": [{"@id": tile_id} for tile_id in tile_ids]}
+        assert all(entities[tile_id]["@type"] == "File" for tile_id in tile_ids)
+        assert ({"@id": group_id} in entities["./"]["hasPart"]) == (place == "subfolder")
+
+    def test_group_needs_name_and_paths(self, tmp_path, bilayers_config):
+        with pytest.raises(ValueError):
+            create_ro_crate(str(tmp_path / "crate"), str(bilayers_config), [{"name": "Empty", "paths": []}])
+
     def test_single_input_path(self, tmp_path, bilayers_config, ome_zarr_dirs):
         """A single input can be given as just its path."""
         input_zarr, output_zarr = ome_zarr_dirs
