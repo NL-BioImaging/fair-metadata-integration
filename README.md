@@ -120,7 +120,8 @@ create_zarr_ro_crate(
 ```
 
 - `source_paths` — the images the store was made from: the store `isBasedOn`
-  them, referenced by their `file://` URI and not part of the store. Many
+  them, referenced by their `file://` URI and not copied into the store; like
+  any file or folder the crate describes, they are among its root's `hasPart`. Many
   images can be one group, as for `input_paths`.
 - `acquisition_metadata` — metadata of (some of) the sources, as `dict`s: an
   `Image acquisition` `CreateAction` (`#acquisition`) with the sources as

@@ -112,7 +112,8 @@ def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=Non
     for path in metadata_paths:
         crate.get(relative_path_inside(path, store_path))['about'] = crate.root_dataset
     root = crate.root_dataset
-    sources = [add_data_group(crate, item, partial(add_source_entity, crate)) for item in source_paths]
+    sources = [add_data_group(crate, item, partial(add_data_entity, crate, crate_path=store_path), store_path)
+               for item in source_paths]
     if sources:
         root['isBasedOn'] = sources
     if acquisition_metadata:
@@ -285,16 +286,6 @@ def add_data_entity(crate, path, crate_path, copy=False):
         entity = add(source=Path(path).resolve().as_uri(), properties=properties)
     else:
         entity = add(source=path, dest_path=rel_path, properties=properties)
-    add_ngff_conformance(crate, entity, path)
-    return entity
-
-
-def add_source_entity(crate, path):
-    """Data something was made from, referenced by its file URI but not part of the crate."""
-    uri = Path(path).resolve().as_uri() + ('/' if os.path.isdir(path) else '')
-    properties = {'@type': 'Dataset' if os.path.isdir(path) else 'File',
-                  **(get_encoding_format_property(crate, str(path)) or {})}
-    entity = crate.add(ContextEntity(crate, uri, properties))
     add_ngff_conformance(crate, entity, path)
     return entity
 

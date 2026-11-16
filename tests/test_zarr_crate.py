@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
+from rocrate.rocrate import ROCrate
 
 from fair_metadata_integration import create_ro_crate, create_zarr_ro_crate, get_ome_zarr_version
 from fair_metadata_integration.provenance import find_metadata_value
@@ -164,9 +165,11 @@ class TestStoreProvenance:
         sources = [{'@id': path.resolve().as_uri()} for path in source_paths]
         root = entities['./']
         assert root['isBasedOn'] == sources
-        # referenced, not part of the store
-        assert not any(source in as_list(root.get('hasPart', [])) for source in sources)
+        # referenced, not copied, and parts of the crate as data entities must be
+        assert all(source in as_list(root['hasPart']) for source in sources)
+        assert not (store / 'tile1.tiff').exists()
         assert entities[sources[0]['@id']]['@type'] == 'File'
+        ROCrate(store)
         assert root['mentions'] == [{'@id': '#acquisition'}, {'@id': '#derivation'}]
         assert root['datePublished'] == '2026-11-05T16:00:00'
 
@@ -206,6 +209,8 @@ class TestStoreProvenance:
         assert entities['#derivation']['object'] == [{'@id': group_id}]
         assert entities[group_id]['hasPart'] == [{'@id': path.resolve().as_uri()} for path in source_paths]
         assert entities[group_id]['@type'] == 'Dataset'
+        assert {'@id': group_id} in as_list(entities['./']['hasPart'])
+        ROCrate(store)
 
     def test_acquisition_without_instrument_or_sources(self, tmp_path):
         store = make_ome_zarr_v3(tmp_path / 'fused.ome.zarr')
