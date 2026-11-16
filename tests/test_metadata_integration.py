@@ -394,6 +394,7 @@ class TestCreateRoCrate:
         group_id = uri(tmp_path / "tiles")
         assert (dest / "tiles.csv").read_text().splitlines() == ["path", "a/tile1.tif", "b/tile2.tif"]
         assert entities["tiles.csv"]["about"] == {"@id": group_id}
+        assert entities["tiles.csv"]["contentSize"] == str((dest / "tiles.csv").stat().st_size)
         assert "hasPart" not in entities[group_id]
         assert not any(entity_id.endswith(".tif") for entity_id in entities)
         assert entities["#run"]["object"] == [{"@id": group_id}]
@@ -493,7 +494,7 @@ class TestCreateRoCrate:
             "muvis-align run", "2026-11-05T15:00:00", "2026-11-05T16:00:00")
         assert entities["config.yaml"]["isPartOf"] == {"@id": software["url"]}
         assert entities[software["url"]] == {"@id": software["url"], "@type": "SoftwareApplication",
-                                             "name": "muvis-align", "url": software["url"], "softwareVersion": "1.2"}
+                                             "name": "muvis-align", "url": software["url"], "version": "1.2"}
 
     def test_run_is_described(self, tmp_path, bilayers_config, ome_zarr_dirs):
         """The run is a CreateAction of the workflow, on the input data, with the output data as result."""
@@ -509,9 +510,28 @@ class TestCreateRoCrate:
         assert run["object"] == [{"@id": uri(input_zarr)}]
         assert run["result"] == [{"@id": "output.ome.zarr/"}]
         assert {"@id": "#run"} in entities["./"]["mentions"]
-        for profile in ("https://w3id.org/ro/wfrun/process/0.5", "https://w3id.org/ro/wfrun/workflow/0.5"):
+        # the 0.6 profiles are the ones built on RO-Crate 1.3, which the crate declares
+        for profile in ("https://w3id.org/ro/wfrun/process/0.6", "https://w3id.org/ro/wfrun/workflow/0.6"):
             assert {"@id": profile} in entities["./"]["conformsTo"]
-            assert entities[profile]["@type"] == "CreativeWork"
+            assert entities[profile]["@type"] == ["CreativeWork", "Profile"]
+        # RO-Crate requires a description and a license on the root, defaulted when not given
+        assert entities["./"]["description"] == "A run of the workflow config.yaml, with its data"
+        assert entities["./"]["license"] == {"@id": "https://creativecommons.org/licenses/by/4.0/"}
+        assert entities["https://creativecommons.org/licenses/by/4.0/"]["name"] == "CC BY 4.0"
+
+    @pytest.mark.parametrize("license, name", [
+        ("https://creativecommons.org/publicdomain/zero/1.0/", "CC0 1.0"),
+        ("https://example.org/my-license", "https://example.org/my-license"),
+        ({"url": "https://example.org/my-license", "name": "Mine"}, "Mine"),
+    ])
+    def test_license_can_be_given(self, tmp_path, bilayers_config, license, name):
+        """A common license is named by its URL alone; another by its name, else its URL."""
+        dest = tmp_path / "crate"
+        create_ro_crate(str(dest), str(bilayers_config), license=license, gen_preview=False)
+        entities = self._read_entities(dest)
+        url = license["url"] if isinstance(license, dict) else license
+        assert entities["./"]["license"] == {"@id": url}
+        assert entities[url]["name"] == name
 
     def test_parameter_values_file_is_about_the_run(self, tmp_path, ome_zarr_dirs):
         """The values file is copied into the crate and is about the run; its values are no entities.

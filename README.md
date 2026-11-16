@@ -63,7 +63,12 @@ create_ro_crate(
   root when they are outside `dest_path` (default `False`: referenced, see below).
 - `gen_preview` — write an `ro-crate-preview.html` alongside the metadata
   (default `True`).
-- `name`, `description` — the name and description of the crate's root dataset.
+- `name`, `description` — the name and description of the crate's root dataset;
+  the description defaults to what the crate holds, as RO-Crate requires one.
+- `license` — the license of the crate's content, which RO-Crate requires: its
+  URL, or a `dict` of its `url`, `name` and `description` (default: CC BY 4.0).
+  The licenses in `COMMON_LICENSES` (Creative Commons 4.0 and CC0, Open Data
+  Commons) are named and described by their URL alone.
 - `metadata_conforms_to` — the schema the metadata files follow, as a `dict` of
   its `url` and optionally its `name` and `version`; each metadata file gets a
   `conformsTo` link to it.
@@ -242,7 +247,9 @@ The workflow specification is the crate's `mainEntity`, typed as a
 `ComputationalWorkflow`. The metadata descriptor declares RO-Crate 1.3, and the
 root dataset declares the Workflow RO-Crate 1.1 profile, and the
 [Process Run Crate and Workflow Run Crate](https://www.researchobject.org/workflow-run-crate/)
-0.5 profiles for the run (not shown):
+0.6 profiles for the run (not shown): the versions built on RO-Crate 1.3. Crates
+pass the [RO-Crate validator](https://github.com/crs4/rocrate-validator)'s
+required checks for these profiles:
 
 ```json
 {
@@ -264,7 +271,9 @@ root dataset declares the Workflow RO-Crate 1.1 profile, and the
 The workflow's `programmingLanguage` is a `ComputerLanguage` entity for the
 Bilayers specification, identified by its Zenodo concept DOI
 [`10.5281/zenodo.17652333`](https://doi.org/10.5281/zenodo.17652333), which
-resolves to the latest release of the spec.
+resolves to the latest release of the spec, with the `version` of the release
+the configs follow (`1.0.0rc1`). Software (e.g. the `software` of the run) gives
+its `version`.
 
 Folders (e.g. OME-Zarr) are `Dataset` entities, files `File` entities, with a
 path relative to the crate when they are in it and their `file://` URI when

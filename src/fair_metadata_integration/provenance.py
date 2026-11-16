@@ -21,7 +21,8 @@ def add_software(crate, software):
     if software.get('url'):
         properties['url'] = str(software['url'])
     if software.get('version'):
-        properties['softwareVersion'] = str(software['version'])
+        # RO-Crate requires `version`, and Process Run Crate rules out also giving `softwareVersion`
+        properties['version'] = str(software['version'])
     identifier = software.get('url') or f'#software-{quote(str(software["name"]))}'
     return crate.add(ContextEntity(crate, str(identifier), properties))
 

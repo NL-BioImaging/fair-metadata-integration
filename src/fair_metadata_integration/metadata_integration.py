@@ -15,9 +15,38 @@ from .files import write_parameters, write_path_list
 from .preview import CratePreview, zarr_attributes
 from .provenance import add_acquisition, add_action_times, add_derivation, add_measurements, add_software
 
-# Workflow Run Crate: the crate also describes a run of the workflow, with its parameter values
-PROCESS_RUN_CRATE = 'https://w3id.org/ro/wfrun/process/0.5'
-WORKFLOW_RUN_CRATE = 'https://w3id.org/ro/wfrun/workflow/0.5'
+# Workflow Run Crate: the crate also describes a run of the workflow, with its parameter values.
+# 0.6 is the version built on RO-Crate 1.3; 0.5 is built on 1.1
+RUN_CRATE_VERSION = '0.6'
+PROCESS_RUN_CRATE = f'https://w3id.org/ro/wfrun/process/{RUN_CRATE_VERSION}'
+WORKFLOW_RUN_CRATE = f'https://w3id.org/ro/wfrun/workflow/{RUN_CRATE_VERSION}'
+# The Bilayers specification release this package's configs follow
+BILAYERS_VERSION = '1.0.0rc1'
+# The common licenses for data, named and described when given by URL alone
+COMMON_LICENSES = [
+    {'url': 'https://creativecommons.org/licenses/by/4.0/', 'name': 'CC BY 4.0',
+     'description': 'Creative Commons Attribution 4.0 International'},
+    {'url': 'https://creativecommons.org/licenses/by-sa/4.0/', 'name': 'CC BY-SA 4.0',
+     'description': 'Creative Commons Attribution-ShareAlike 4.0 International'},
+    {'url': 'https://creativecommons.org/licenses/by-nc/4.0/', 'name': 'CC BY-NC 4.0',
+     'description': 'Creative Commons Attribution-NonCommercial 4.0 International'},
+    {'url': 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'name': 'CC BY-NC-SA 4.0',
+     'description': 'Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International'},
+    {'url': 'https://creativecommons.org/licenses/by-nd/4.0/', 'name': 'CC BY-ND 4.0',
+     'description': 'Creative Commons Attribution-NoDerivatives 4.0 International'},
+    {'url': 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'name': 'CC BY-NC-ND 4.0',
+     'description': 'Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International'},
+    {'url': 'https://creativecommons.org/publicdomain/zero/1.0/', 'name': 'CC0 1.0',
+     'description': 'Creative Commons Zero 1.0 Universal, public domain dedication'},
+    {'url': 'https://opendatacommons.org/licenses/by/1-0/', 'name': 'ODC-By 1.0',
+     'description': 'Open Data Commons Attribution License 1.0'},
+    {'url': 'https://opendatacommons.org/licenses/odbl/1-0/', 'name': 'ODbL 1.0',
+     'description': 'Open Data Commons Open Database License 1.0'},
+    {'url': 'https://opendatacommons.org/licenses/pddl/1-0/', 'name': 'PDDL 1.0',
+     'description': 'Open Data Commons Public Domain Dedication and License 1.0'},
+]
+# RO-Crate requires a license on the root; this one applies unless another is given
+DEFAULT_LICENSE = COMMON_LICENSES[0]
 # The OME-NGFF specification, by version
 NGFF_URL = 'https://ngff.openmicroscopy.org/{version}/'
 # Terms for describing biological imaging metadata, added to the crate's JSON-LD context
@@ -41,7 +70,7 @@ EXTRA_TERMS = {
 def create_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), output_paths=(), metadata_paths=(),
                     parameters=None, copy_inputs=False, copy_outputs=False, gen_preview=True,
                     name=None, description=None, metadata_conforms_to=None, ome_version=None,
-                    run_name=None, start_time=None, end_time=None, software=None):
+                    run_name=None, start_time=None, end_time=None, software=None, license=None):
     """Write an RO-Crate to *dest_path*; return the crate.
 
     With a bilayers workflow *workflow_schema_filename* it is a Workflow Run Crate for a run
@@ -62,7 +91,9 @@ def create_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), ou
     Inputs and outputs outside *dest_path* are referenced by their file URI, unless
     *copy_inputs* / *copy_outputs* is set: then they are copied to the crate root.
 
-    *name* and *description* are those of the crate's root dataset. *metadata_conforms_to*
+    *name* and *description* are those of the crate's root dataset; the description defaults
+    to what the crate holds. *license* is the license of its content, as RO-Crate requires:
+    its URL, or a mapping of its 'url' and 'name' (default: CC BY 4.0). *metadata_conforms_to*
     is the schema the metadata files follow, as a mapping of its 'url' and optionally its
     'name' and 'version'. When *dest_path* is an OME-Zarr store, the root dataset conforms
     to its OME-NGFF version: *ome_version*, or else the one the store states.
@@ -73,28 +104,29 @@ def create_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), ou
     """
     crate = build_ro_crate(dest_path, workflow_schema_filename, input_paths, output_paths, metadata_paths,
                            parameters, copy_inputs, copy_outputs, gen_preview, name, description,
-                           metadata_conforms_to, ome_version, run_name, start_time, end_time, software)
+                           metadata_conforms_to, ome_version, run_name, start_time, end_time, software, license)
     crate.write(dest_path)
     return crate
 
 
 def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=None, description=None,
                          ome_version=None, gen_preview=True, source_paths=(), acquisition_metadata=(),
-                         derivation=None, measurements=None):
+                         derivation=None, measurements=None, license=None):
     """Write an RO-Crate into the existing OME-Zarr store *store_path*, describing it; return the crate.
 
     Only ro-crate-metadata.json (with *gen_preview* the preview, and the 'list_file' of a group
-    of sources) is written: the store itself is left as it is. The root dataset is the store, named after it, with its Zarr
-    format and the OME-NGFF version it conforms to: *ome_version*, or else the one the store
-    states. *description* defaults to what the store holds.
+    of sources) is written: the store itself is left as it is. The root dataset is the store,
+    named after it, with its Zarr format and the OME-NGFF version it conforms to: *ome_version*,
+    or else the one the store states. *description* defaults to what the store holds;
+    *license* is as for :func:`create_ro_crate`.
 
     *metadata_paths* are files in the store describing it, e.g. its acquisition metadata;
     *metadata_conforms_to* is the schema they follow, as a mapping of its 'url' and
     optionally its 'name' and 'version'.
 
     Where the store came from: *source_paths* are the images it was made from, which it is
-    based on, each a path or a group of paths as for :func:`create_ro_crate`; *acquisition_metadata* is the metadata of (some of) those images, as mappings,
-    in which the instrument and acquisition times are looked up; *derivation* is how it was
+    based on, each a path or a group of paths as for :func:`create_ro_crate`;
+    *acquisition_metadata* is the metadata of (some of) those images, as mappings, in which the instrument and acquisition times are looked up; *derivation* is how it was
     made from them, as a mapping of its 'name', and optionally its 'software' (a mapping of
     'name', 'url' and 'version'), 'start_time' and 'end_time'; *measurements* map the names
     of values measured on it to a value, or to a mapping of its 'value', 'description' and 'unit'.
@@ -109,7 +141,7 @@ def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=Non
         description = 'OME-Zarr image with labels' if has_labels else 'OME-Zarr image'
     crate = build_ro_crate(store_path, metadata_paths=metadata_paths, gen_preview=gen_preview,
                            name=store_name(store_path), description=description,
-                           metadata_conforms_to=metadata_conforms_to, ome_version=ome_version)
+                           metadata_conforms_to=metadata_conforms_to, ome_version=ome_version, license=license)
     for path in metadata_paths:
         crate.get(relative_path_inside(path, store_path))['about'] = crate.root_dataset
     root = crate.root_dataset
@@ -132,7 +164,7 @@ def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=Non
 def build_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), output_paths=(), metadata_paths=(),
                    parameters=None, copy_inputs=False, copy_outputs=False, gen_preview=True,
                    name=None, description=None, metadata_conforms_to=None, ome_version=None,
-                   run_name=None, start_time=None, end_time=None, software=None):
+                   run_name=None, start_time=None, end_time=None, software=None, license=None):
     """The crate :func:`create_ro_crate` writes, not written yet."""
     if parameters is not None and workflow_schema_filename is None:
         raise ValueError('Parameter values need a workflow to be the values of')
@@ -142,8 +174,11 @@ def build_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), out
     crate.metadata.extra_terms = dict(EXTRA_TERMS)
     if name is not None:
         crate.root_dataset['name'] = name
-    if description is not None:
-        crate.root_dataset['description'] = description
+    if description is None:
+        description = (f'A run of the workflow {os.path.basename(workflow_schema_filename)}, with its data'
+                       if workflow_schema_filename is not None else 'Data and the metadata describing it')
+    crate.root_dataset['description'] = description
+    crate.root_dataset['license'] = add_license_entity(crate, license or DEFAULT_LICENSE)
     describe_ome_zarr_root(crate, dest_path, ome_version)
 
     output_entities = [add_data_group(crate, item, partial(add_data_entity, crate, crate_path=dest_path,
@@ -199,7 +234,7 @@ def add_workflow_run(crate, workflow_schema_filename, input_entities, output_ent
         add_data_entity(crate, parameters, dest_path, copy=True)['about'] = run
     for profile, name in ((PROCESS_RUN_CRATE, 'Process Run Crate'), (WORKFLOW_RUN_CRATE, 'Workflow Run Crate')):
         crate.root_dataset.append_to('conformsTo', crate.add(ContextEntity(crate, profile, {
-            '@type': 'CreativeWork', 'name': name, 'version': '0.5'})))
+            '@type': ['CreativeWork', 'Profile'], 'name': name, 'version': RUN_CRATE_VERSION})))
     crate.root_dataset.append_to('mentions', run)
 
 
@@ -257,6 +292,21 @@ def add_ngff_entity(crate, ome_version):
     """The OME-NGFF specification of version *ome_version*, as a contextual entity."""
     return crate.add(ContextEntity(crate, NGFF_URL.format(version=ome_version), {
         '@type': ['CreativeWork', 'Profile'], 'name': f'OME-NGFF {ome_version}', 'version': str(ome_version)}))
+
+
+def add_license_entity(crate, license):
+    """The license *license*, its URL or a mapping of its 'url' and optionally 'name' and 'description', as a
+    contextual entity; one of the COMMON_LICENSES is named and described by its URL alone."""
+    if not isinstance(license, Mapping):
+        license = {'url': license}
+    known = next((common for common in COMMON_LICENSES if common['url'] == license.get('url')), {})
+    license = known | {key: value for key, value in license.items() if value}
+    if not license.get('url'):
+        raise ValueError("A license needs a 'url'")
+    properties = {'@type': 'CreativeWork', 'name': str(license.get('name') or license['url'])}
+    if license.get('description'):
+        properties['description'] = str(license['description'])
+    return crate.add(ContextEntity(crate, str(license['url']), properties))
 
 
 def add_schema_entity(crate, schema):
@@ -318,7 +368,11 @@ def add_data_group(crate, item, add_entity, crate_path=None, copy=False):
         group['hasPart'] = members
     if list_file:
         list_path = write_path_list(os.path.join(crate_path, list_file), item['paths'], common_folder(item['paths']))
-        add_data_entity(crate, list_path, crate_path)['about'] = group
+        list_entity = add_data_entity(crate, list_path, crate_path)
+        list_entity['about'] = group
+        list_entity['name'] = f'{item["name"]}: file list'
+        list_entity['description'] = f'The paths of the {len(item["paths"])} files of {item["name"]}, relative to its folder'
+        list_entity['contentSize'] = str(os.path.getsize(list_path))
     root_parts = crate.root_dataset.get('hasPart', [])
     # a '#' id is contextual, so its files must stay the root's parts to be data entities
     if not identifier.startswith('#') and all(member in root_parts for member in members):
@@ -429,6 +483,7 @@ def get_bilayers_language(crate):
         properties={
             'name': 'Bilayers',
             'alternateName': 'Bilayers workflow specification',
+            'version': BILAYERS_VERSION,
             'identifier': {'@id': 'https://doi.org/10.5281/zenodo.17652333'},
             'url': {'@id': 'https://github.com/bilayer-containers/bilayers'},
         },
