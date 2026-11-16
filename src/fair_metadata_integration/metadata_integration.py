@@ -12,6 +12,7 @@ from rocrate.model import ComputerLanguage, ContextEntity
 
 from .bilayers import unknown_value_names
 from .files import write_parameters, write_path_list
+from .licenses import COMMON_LICENSES, DEFAULT_LICENSE
 from .preview import CratePreview, zarr_attributes
 from .provenance import add_acquisition, add_action_times, add_derivation, add_measurements, add_software
 
@@ -22,31 +23,10 @@ PROCESS_RUN_CRATE = f'https://w3id.org/ro/wfrun/process/{RUN_CRATE_VERSION}'
 WORKFLOW_RUN_CRATE = f'https://w3id.org/ro/wfrun/workflow/{RUN_CRATE_VERSION}'
 # The Bilayers specification release this package's configs follow
 BILAYERS_VERSION = '1.0.0rc1'
-# The common licenses for data, named and described when given by URL alone
-COMMON_LICENSES = [
-    {'url': 'https://creativecommons.org/licenses/by/4.0/', 'name': 'CC BY 4.0',
-     'description': 'Creative Commons Attribution 4.0 International'},
-    {'url': 'https://creativecommons.org/licenses/by-sa/4.0/', 'name': 'CC BY-SA 4.0',
-     'description': 'Creative Commons Attribution-ShareAlike 4.0 International'},
-    {'url': 'https://creativecommons.org/licenses/by-nc/4.0/', 'name': 'CC BY-NC 4.0',
-     'description': 'Creative Commons Attribution-NonCommercial 4.0 International'},
-    {'url': 'https://creativecommons.org/licenses/by-nc-sa/4.0/', 'name': 'CC BY-NC-SA 4.0',
-     'description': 'Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International'},
-    {'url': 'https://creativecommons.org/licenses/by-nd/4.0/', 'name': 'CC BY-ND 4.0',
-     'description': 'Creative Commons Attribution-NoDerivatives 4.0 International'},
-    {'url': 'https://creativecommons.org/licenses/by-nc-nd/4.0/', 'name': 'CC BY-NC-ND 4.0',
-     'description': 'Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International'},
-    {'url': 'https://creativecommons.org/publicdomain/zero/1.0/', 'name': 'CC0 1.0',
-     'description': 'Creative Commons Zero 1.0 Universal, public domain dedication'},
-    {'url': 'https://opendatacommons.org/licenses/by/1-0/', 'name': 'ODC-By 1.0',
-     'description': 'Open Data Commons Attribution License 1.0'},
-    {'url': 'https://opendatacommons.org/licenses/odbl/1-0/', 'name': 'ODbL 1.0',
-     'description': 'Open Data Commons Open Database License 1.0'},
-    {'url': 'https://opendatacommons.org/licenses/pddl/1-0/', 'name': 'PDDL 1.0',
-     'description': 'Open Data Commons Public Domain Dedication and License 1.0'},
-]
-# RO-Crate requires a license on the root; this one applies unless another is given
-DEFAULT_LICENSE = COMMON_LICENSES[0]
+BIOSCHEMAS_WORKFLOW_PROFILE = 'https://bioschemas.org/profiles/ComputationalWorkflow/1.0-RELEASE'
+README_NAME = 'README.md'
+# marks a README this package wrote, so a rerun rewrites it but never one written by hand
+README_MARK = '<!-- written by fair-metadata-integration -->'
 # The OME-NGFF specification, by version
 NGFF_URL = 'https://ngff.openmicroscopy.org/{version}/'
 # Terms for describing biological imaging metadata, added to the crate's JSON-LD context
@@ -105,6 +85,7 @@ def create_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), ou
     crate = build_ro_crate(dest_path, workflow_schema_filename, input_paths, output_paths, metadata_paths,
                            parameters, copy_inputs, copy_outputs, gen_preview, name, description,
                            metadata_conforms_to, ome_version, run_name, start_time, end_time, software, license)
+    use_single_values(crate)
     crate.write(dest_path)
     return crate
 
@@ -157,6 +138,7 @@ def create_zarr_ro_crate(store_path, metadata_paths=(), metadata_conforms_to=Non
             root['datePublished'] = action['endTime']
     if measurements:
         add_measurements(crate, measurements, root)
+    use_single_values(crate)
     crate.write(store_path)
     return crate
 
@@ -196,10 +178,41 @@ def build_ro_crate(dest_path, workflow_schema_filename=None, input_paths=(), out
     if workflow_schema_filename is not None:
         add_workflow_run(crate, workflow_schema_filename, input_entities, output_entities, parameters, dest_path,
                          run_name, start_time, end_time, software)
+        add_readme(crate, dest_path)
 
     if gen_preview:
-        crate.add(CratePreview(crate))
+        crate.add(CratePreview(crate, properties={'name': 'Preview of the crate',
+                                                  'description': 'Its entities and their properties, as a web page'}))
     return crate
+
+
+def add_readme(crate, crate_path):
+    """README.md about the crate, as Workflow RO-Crate recommends: written from the crate's name and description,
+    unless the folder has a README.md of its own, which is then described as it is."""
+    path = os.path.join(crate_path, README_NAME)
+    if not os.path.exists(path) or Path(path).read_text(encoding='utf-8').startswith(README_MARK):
+        root = crate.root_dataset
+        lines = [README_MARK, f'# {root.get("name") or os.path.basename(os.path.abspath(crate_path))}', '',
+                 str(root.get('description', '')), '',
+                 f'This folder is an [RO-Crate](https://w3id.org/ro/crate): `{crate.metadata.id}` describes it, '
+                 f'and `ro-crate-preview.html` shows that description as a web page.']
+        os.makedirs(crate_path, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as file:
+            file.write('\n'.join(lines) + '\n')
+    readme = add_data_entity(crate, path, crate_path)
+    readme['about'] = crate.root_dataset
+    readme['encodingFormat'] = 'text/markdown'
+    readme['description'] = 'What the crate holds'
+    return readme
+
+
+def use_single_values(crate):
+    """Write a property with one value as that value, not a list of it, as RO-Crate 1.3 recommends."""
+    for entity in crate.get_entities():
+        properties = entity.properties()
+        for key, value in properties.items():
+            if isinstance(value, list) and len(value) == 1:
+                properties[key] = value[0]
 
 
 def add_workflow_run(crate, workflow_schema_filename, input_entities, output_entities, parameters, dest_path,
@@ -214,11 +227,13 @@ def add_workflow_run(crate, workflow_schema_filename, input_entities, output_ent
                                   dest_path=os.path.basename(workflow_schema_filename),
                                   main=True, lang=get_bilayers_language(crate))
 
+    describe_workflow(crate, workflow, workflow_schema_filename, software)
+
     # The run itself: the workflow as instrument, the input data as object, the output data as result.
-    if software:
-        workflow['isPartOf'] = add_software(crate, software)
-    run = crate.add(ContextEntity(crate, '#run', {'@type': 'CreateAction',
-                                                  'name': run_name or f'Run of {workflow.id}'}))
+    run = crate.add(ContextEntity(crate, '#run', {
+        '@type': 'CreateAction', 'name': run_name or f'Run of {workflow.id}',
+        'description': f'A run of the workflow {workflow.id} on {len(input_entities)} input(s), '
+                       f'giving {len(output_entities)} result(s)'}))
     run['instrument'] = workflow
     add_action_times(run, start_time, end_time)
     if input_entities:
@@ -231,11 +246,32 @@ def add_workflow_run(crate, workflow_schema_filename, input_entities, output_ent
         unknown = unknown_value_names(read_yaml(workflow_schema_filename), read_yaml(parameters) or {})
         if unknown:
             warnings.warn(f'Parameter values not in the workflow {workflow.id}: {", ".join(unknown)}')
-        add_data_entity(crate, parameters, dest_path, copy=True)['about'] = run
+        parameters_entity = add_data_entity(crate, parameters, dest_path, copy=True)
+        parameters_entity['about'] = run
+        parameters_entity['description'] = 'The parameter values of the run'
     for profile, name in ((PROCESS_RUN_CRATE, 'Process Run Crate'), (WORKFLOW_RUN_CRATE, 'Workflow Run Crate')):
         crate.root_dataset.append_to('conformsTo', crate.add(ContextEntity(crate, profile, {
             '@type': ['CreativeWork', 'Profile'], 'name': name, 'version': RUN_CRATE_VERSION})))
     crate.root_dataset.append_to('mentions', run)
+
+
+def describe_workflow(crate, workflow, workflow_schema_filename, software=None):
+    """Give the workflow what Process Run Crate and Bioschemas recommend: its format, size and description (from
+    the config's first citation), and the version and url of the software it is part of."""
+    workflow.properties().update(get_encoding_format_property(crate, workflow_schema_filename) or {})
+    workflow['contentSize'] = str(os.path.getsize(workflow_schema_filename))
+    citations = (read_yaml(workflow_schema_filename) or {}).get('citations') or [{}]
+    tool = citations[0] if isinstance(citations[0], Mapping) else {}
+    workflow['description'] = ': '.join(str(text) for text in (
+        f'Bilayers workflow of {tool.get("name") or workflow.id}', tool.get('description')) if text)
+    workflow['conformsTo'] = crate.add(ContextEntity(crate, BIOSCHEMAS_WORKFLOW_PROFILE, {
+        '@type': ['CreativeWork', 'Profile'], 'name': 'Bioschemas ComputationalWorkflow profile',
+        'version': '1.0-RELEASE'}))
+    if software:
+        workflow['isPartOf'] = add_software(crate, software)
+        for key in ('version', 'url'):
+            if software.get(key):
+                workflow[key] = str(software[key])
 
 
 def store_name(store_path):
@@ -338,7 +374,20 @@ def add_data_entity(crate, path, crate_path, copy=False):
     else:
         entity = add(source=path, dest_path=rel_path, properties=properties)
     add_ngff_conformance(crate, entity, path)
+    # what RO-Crate recommends for every data entity, from the path; a caller can give better
+    entity['name'] = os.path.basename(str(path).rstrip('\\/'))
+    entity['description'] = data_description(path)
+    if os.path.isfile(path):
+        entity['contentSize'] = str(os.path.getsize(path))
     return entity
+
+
+def data_description(path):
+    """What *path* holds, as far as its name and content tell: e.g. 'OME-Zarr image', 'CSV file'."""
+    if os.path.isdir(path):
+        return 'OME-Zarr image' if is_ome_zarr(path) else 'Folder'
+    file_format = get_file_format(path)
+    return f'{file_format[1]} file' if file_format else 'File'
 
 
 def add_data_group(crate, item, add_entity, crate_path=None, copy=False):
@@ -485,6 +534,7 @@ def get_bilayers_language(crate):
             'alternateName': 'Bilayers workflow specification',
             'version': BILAYERS_VERSION,
             'identifier': {'@id': 'https://doi.org/10.5281/zenodo.17652333'},
-            'url': {'@id': 'https://github.com/bilayer-containers/bilayers'},
+            # as text: a reference would need an entity of its own
+            'url': 'https://github.com/bilayer-containers/bilayers',
         },
     ))

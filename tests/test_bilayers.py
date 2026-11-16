@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from fair_metadata_integration import (bilayers_config, bilayers_format, create_ro_crate, display_entry,
-                                       image_entry, parameter_entry, write_bilayers_config)
+from fair_metadata_integration import (COMMON_LICENSES, DEFAULT_LICENSE, bilayers_config, bilayers_format,
+                                       create_ro_crate, display_entry, image_entry, license_entry, parameter_entry,
+                                       write_bilayers_config)
 from fair_metadata_integration.bilayers import unknown_value_names
 
 
@@ -59,6 +60,11 @@ class TestBilayersConfig:
         entry = parameter_entry('tile_size', 512)
         assert (entry['type'], entry['default'], entry['cli_tag']) == ('integer', 512, '--tile_size')
         assert 'section_id' not in entry
+
+    def test_license_entry_offers_the_common_licenses(self):
+        entry = license_entry(section='fusion')
+        assert (entry['type'], entry['default'], entry['section_id']) == ('dropdown', DEFAULT_LICENSE['url'], 'fusion')
+        assert entry['options'] == [{'label': license['name'], 'value': license['url']} for license in COMMON_LICENSES]
 
     def test_sections_hold_the_run_values(self):
         config = bilayers_config('segment', {'threshold': 0.5}, section='inference',

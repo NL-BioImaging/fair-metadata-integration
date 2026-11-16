@@ -1,10 +1,13 @@
-from .bilayers import (bilayers_config, bilayers_format, display_entry, image_entry, parameter_entry,
+from .bilayers import (bilayers_config, bilayers_format, display_entry, image_entry, license_entry, parameter_entry,
                        validate_bilayers_config, write_bilayers_config)
 from .files import PARAMETERS_FILE_NAME, WORKFLOW_CONFIG_NAME, plain_value, write_parameters, write_yaml
-from .metadata_integration import COMMON_LICENSES, create_ro_crate, create_zarr_ro_crate, get_ome_zarr_version
+from .licenses import COMMON_LICENSES, DEFAULT_LICENSE
+from .metadata_integration import create_ro_crate, create_zarr_ro_crate, get_ome_zarr_version
 
 __all__ = [
     "COMMON_LICENSES",
+    "DEFAULT_LICENSE",
+    "license_entry",
     "create_ro_crate",
     "create_zarr_ro_crate",
     "get_ome_zarr_version",

@@ -352,6 +352,26 @@ Without `list_file`:
 }
 ```
 
+#### Filled in automatically
+
+What RO-Crate and the run profiles recommend is filled in from what is known, so
+a crate passes the validator's required checks and nearly all recommended ones:
+
+- every file and folder: its `name`, a `description` from its format (e.g.
+  "OME-Zarr image", "CSV file") and, for a file, its `contentSize`;
+- the run: a `description`, and times with their UTC offset (a `datetime` is
+  local time; text, such as an acquisition time, is kept as it is);
+- the workflow: its format, size, a `description` from the config's first
+  citation, `conformsTo` the Bioschemas ComputationalWorkflow profile, and the
+  `version` and `url` of the `software` it is part of;
+- a `README.md` about the crate, written from its name and description; a
+  README of your own is described as it is, never overwritten;
+- a property with one value is written as that value, not a list of one.
+
+The run's `agent` and the crate's `publisher`, a person or organisation, are
+not known, so they are left out. A Bilayers config can offer the licenses as a
+drop-down with `license_entry()`.
+
 The crate's JSON-LD context is extended with terms for describing biological
 imaging metadata — `biosample`, `specimen`, `organism_classification`,
 `preparation_method`, `channel` and others — so those properties can be added to

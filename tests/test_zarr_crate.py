@@ -207,8 +207,8 @@ class TestStoreProvenance:
 
         entities = read_entities(store)
         group_id = (tmp_path / 'tiles').resolve().as_uri() + '/'
-        assert entities['./']['isBasedOn'] == [{'@id': group_id}]
-        assert entities['#derivation']['object'] == [{'@id': group_id}]
+        assert entities['./']['isBasedOn'] == {'@id': group_id}
+        assert entities['#derivation']['object'] == {'@id': group_id}
         if list_file:
             assert (store / list_file).read_text().splitlines() == ['path', 'tile1.tiff', 'tile2.tiff']
             assert entities[list_file]['about'] == {'@id': group_id}

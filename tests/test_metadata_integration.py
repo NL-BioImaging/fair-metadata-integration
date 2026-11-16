@@ -256,7 +256,7 @@ class TestCreateRoCrate:
         assert (dest / "labels.ome.zarr" / "0" / "0.0.0").read_bytes() == b"\x04"
         assert (dest / "Nuclei.csv").read_text() == "ObjectNumber,Area\n1,42\n"
         entities = self._read_entities(dest)
-        assert entities["#run"]["object"] == [{"@id": "input.ome.zarr/"}]
+        assert entities["#run"]["object"] == {"@id": "input.ome.zarr/"}
         assert entities["labels.ome.zarr/"]["@type"] == "Dataset"
         assert entities["Nuclei.csv"]["@type"] == "File"
         assert not any(eid.startswith("file:") for eid in entities)
@@ -368,7 +368,7 @@ class TestCreateRoCrate:
             "subfolder": ("tiles/", ["tiles/tile1.tif", "tiles/tile2.tif"]),
             "root": ("#dataset-Source%20tiles", ["tile1.tif", "tile2.tif"]),
         }[place]
-        assert entities["#run"]["object"] == [{"@id": group_id}]
+        assert entities["#run"]["object"] == {"@id": group_id}
         assert entities[group_id] == {"@id": group_id, "@type": "Dataset", "name": "Source tiles",
                                       "description": "2 tiles", "hasPart": [{"@id": tile_id} for tile_id in tile_ids]}
         assert all(entities[tile_id]["@type"] == "File" for tile_id in tile_ids)
@@ -397,7 +397,7 @@ class TestCreateRoCrate:
         assert entities["tiles.csv"]["contentSize"] == str((dest / "tiles.csv").stat().st_size)
         assert "hasPart" not in entities[group_id]
         assert not any(entity_id.endswith(".tif") for entity_id in entities)
-        assert entities["#run"]["object"] == [{"@id": group_id}]
+        assert entities["#run"]["object"] == {"@id": group_id}
         assert {"@id": group_id} in entities["./"]["hasPart"]
         ROCrate(dest)
 
@@ -415,7 +415,7 @@ class TestCreateRoCrate:
 
         create_ro_crate(str(dest), str(bilayers_config), input_zarr, [str(output_zarr)])
 
-        assert self._read_entities(dest)["#run"]["object"] == [{"@id": uri(input_zarr)}]
+        assert self._read_entities(dest)["#run"]["object"] == {"@id": uri(input_zarr)}
 
     def test_no_inputs(self, tmp_path, bilayers_config):
         """A run without input data has no input parameter for data, and no object."""
@@ -468,8 +468,8 @@ class TestCreateRoCrate:
 
         assert str(dest) in capsys.readouterr().out
         entities = self._read_entities(dest)
-        assert entities["#run"]["object"] == [{"@id": "input.ome.zarr/"}]
-        assert entities["#run"]["result"] == [{"@id": "output.ome.zarr/"}]
+        assert entities["#run"]["object"] == {"@id": "input.ome.zarr/"}
+        assert entities["#run"]["result"] == {"@id": "output.ome.zarr/"}
         assert "acquisition.yaml" in entities
         assert entities["parameters.yaml"]["about"] == {"@id": "#run"}
         assert entities["#run"]["name"] == "Segmentation"
@@ -490,11 +490,41 @@ class TestCreateRoCrate:
 
         entities = self._read_entities(dest)
         run = entities["#run"]
+        # a datetime is local time, given with its UTC offset; text is kept as it is
         assert (run["name"], run["startTime"], run["endTime"]) == (
-            "muvis-align run", "2026-11-05T15:00:00", "2026-11-05T16:00:00")
-        assert entities["config.yaml"]["isPartOf"] == {"@id": software["url"]}
+            "muvis-align run", datetime(2026, 11, 5, 15).astimezone().isoformat(timespec="seconds"),
+            "2026-11-05T16:00:00")
+        workflow = entities["config.yaml"]
+        assert workflow["isPartOf"] == {"@id": software["url"]}
+        assert (workflow["version"], workflow["url"]) == ("1.2", software["url"])
+        assert workflow["conformsTo"] == {"@id": "https://bioschemas.org/profiles/ComputationalWorkflow/1.0-RELEASE"}
         assert entities[software["url"]] == {"@id": software["url"], "@type": "SoftwareApplication",
                                              "name": "muvis-align", "url": software["url"], "version": "1.2"}
+
+    def test_recommended_descriptions_are_filled_in(self, tmp_path, bilayers_config, ome_zarr_dirs):
+        """What RO-Crate recommends is filled in from what is known: names, sizes, descriptions, a README."""
+        input_zarr, output_zarr = ome_zarr_dirs
+        table = tmp_path / "crate" / "Nuclei.csv"
+        table.parent.mkdir(exist_ok=True)
+        table.write_text("ObjectNumber,Area\n1,42\n")
+        dest = tmp_path / "crate"
+
+        create_ro_crate(str(dest), str(bilayers_config), [str(input_zarr)], [str(output_zarr), str(table)],
+                        gen_preview=False)
+
+        entities = self._read_entities(dest)
+        assert {key: entities["Nuclei.csv"][key] for key in ("name", "description", "contentSize")} == {
+            "name": "Nuclei.csv", "description": "CSV file", "contentSize": str(table.stat().st_size)}
+        assert entities[uri(input_zarr)]["description"] == "OME-Zarr image"
+        assert entities["#run"]["description"] == "A run of the workflow config.yaml on 1 input(s), giving 2 result(s)"
+        readme = entities["README.md"]
+        assert (readme["about"], readme["encodingFormat"]) == ({"@id": "./"}, "text/markdown")
+        assert (dest / "README.md").read_text(encoding="utf-8").startswith("<!-- written by")
+        # a README of one's own is described, never overwritten
+        (dest / "README.md").write_text("# Mine\n", encoding="utf-8")
+        create_ro_crate(str(dest), str(bilayers_config), [str(input_zarr)], gen_preview=False)
+        assert (dest / "README.md").read_text(encoding="utf-8") == "# Mine\n"
+        assert "README.md" in self._read_entities(dest)
 
     def test_run_is_described(self, tmp_path, bilayers_config, ome_zarr_dirs):
         """The run is a CreateAction of the workflow, on the input data, with the output data as result."""
@@ -507,9 +537,9 @@ class TestCreateRoCrate:
         run = entities["#run"]
         assert run["@type"] == "CreateAction"
         assert run["instrument"] == {"@id": "config.yaml"}
-        assert run["object"] == [{"@id": uri(input_zarr)}]
-        assert run["result"] == [{"@id": "output.ome.zarr/"}]
-        assert {"@id": "#run"} in entities["./"]["mentions"]
+        assert run["object"] == {"@id": uri(input_zarr)}
+        assert run["result"] == {"@id": "output.ome.zarr/"}
+        assert entities["./"]["mentions"] == {"@id": "#run"}
         # the 0.6 profiles are the ones built on RO-Crate 1.3, which the crate declares
         for profile in ("https://w3id.org/ro/wfrun/process/0.6", "https://w3id.org/ro/wfrun/workflow/0.6"):
             assert {"@id": profile} in entities["./"]["conformsTo"]
@@ -552,7 +582,7 @@ class TestCreateRoCrate:
         entities = self._read_entities(dest)
         assert (dest / "parameters.yaml").read_text() == values.read_text()
         assert entities["parameters.yaml"]["about"] == {"@id": "#run"}
-        assert entities["#run"]["object"] == [{"@id": uri(input_zarr)}]
+        assert entities["#run"]["object"] == {"@id": uri(input_zarr)}
         assert not any(entity["@type"] in ("FormalParameter", "PropertyValue") for entity in entities.values())
 
     def test_parameter_values_from_a_mapping_are_written_to_a_file(self, tmp_path, bilayers_config, ome_zarr_dirs):
@@ -746,7 +776,7 @@ class TestPreview:
 
         dest = self._make_crate(tmp_path, broken)
 
-        assert "OME-Zarr" not in (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
+        assert "<strong>OME-Zarr" not in (dest / "ro-crate-preview.html").read_text(encoding="utf-8")
 
     def test_cellprofiler_csv_column_types(self, tmp_path):
         table = tmp_path / "Image.csv"

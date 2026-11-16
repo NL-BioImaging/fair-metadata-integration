@@ -99,8 +99,12 @@ def add_instrument(crate, properties):
 
 
 def to_iso_datetime(value):
+    """*value* as ISO 8601 text; a datetime with its UTC offset, as Process Run Crate recommends (naive as local time).
+    Text, e.g. an instrument's acquisition time, is kept as it is: its time zone is not known."""
     if not value:
         return None
+    if isinstance(value, datetime):
+        return value.astimezone().isoformat(timespec='seconds')
     if hasattr(value, 'isoformat'):
         return value.isoformat()
     text = str(value)

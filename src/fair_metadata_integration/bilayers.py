@@ -12,6 +12,7 @@ import logging
 import os
 
 from .files import plain_value, write_yaml
+from .licenses import COMMON_LICENSES, DEFAULT_LICENSE
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,16 @@ def parameter_entry(name, value, choices=None, section=None):
     })
     if section:
         entry['section_id'] = str(section)
+    return entry
+
+
+def license_entry(name='license', section=None):
+    """Return the drop-down entry choosing the license of a run's output, which its crate records: the
+    COMMON_LICENSES by URL, the default first."""
+    entry = parameter_entry(name, DEFAULT_LICENSE['url'], [license['url'] for license in COMMON_LICENSES], section)
+    entry['options'] = [{'label': license['name'], 'value': license['url']} for license in COMMON_LICENSES]
+    entry['label'] = 'License'
+    entry['description'] = 'License of the output, recorded in its RO-Crate metadata'
     return entry
 
 
